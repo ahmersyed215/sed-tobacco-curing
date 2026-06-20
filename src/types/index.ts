@@ -1,0 +1,216 @@
+export type DeviceType = 'HYGROMETER' | 'HYGROMETER_WITH_SOLAR' | 'TRADOMATION';
+
+export type PaymentStatus = 'PAID' | 'PARTIALLY_PAID' | 'UNPAID';
+
+export interface Installation {
+  id: string;
+  deviceType: DeviceType;
+  deviceId?: string;
+  farmerName: string;
+  farmerNumber: string;
+  farmerCNIC: string;
+  region: string;
+  depo: string;
+  location?: string;
+  sedRepresentative: string;
+  ptcRepresentative: string;
+  installationDate: Date;
+  totalAmount: number;
+  followupDate?: Date;
+  latestReceiptId?: string;
+  createdAt: Date;
+  updatedAt: Date;
+}
+
+export interface Payment {
+  id: string;
+  installationId: string;
+  receiptId: string;
+  amount: number;
+  paymentDate: Date;
+  notes?: string;
+  createdAt: Date;
+  createdBy: string;
+}
+
+export interface InstallationWithCalculations extends Installation {
+  amountReceived: number;
+  amountPending: number;
+  paymentStatus: PaymentStatus;
+  receiptIds: string[];
+}
+
+export interface InstallationFormData {
+  deviceType: DeviceType;
+  deviceId?: string;
+  farmerName: string;
+  farmerNumber: string;
+  farmerCNIC: string;
+  region: string;
+  depo?: string;
+  location?: string;
+  sedRepresentative: string;
+  ptcRepresentative?: string;
+  installationDate: Date;
+  totalAmount: number;
+  followupDate?: Date | null;
+  receiptId?: string;
+  paidAmount?: number;
+  autoGenerateReceipt?: boolean;
+}
+
+export interface PaymentFormData {
+  receiptId: string;
+  amount: number;
+  paymentDate: Date;
+  notes?: string;
+  autoGenerateReceipt?: boolean;
+}
+
+export interface InstallationFilters {
+  region?: string;
+  depo?: string;
+  deviceType?: DeviceType | '';
+  sedRepresentative?: string;
+  ptcRepresentative?: string;
+  installationDateFrom?: Date | null;
+  installationDateTo?: Date | null;
+  pendingPaymentsOnly?: boolean;
+  fullyPaidOnly?: boolean;
+  followupDueOnly?: boolean;
+  search?: string;
+}
+
+export interface DashboardStats {
+  totalInstallations: number;
+  totalHygrometers: number;
+  totalHygrometersWithSolar: number;
+  totalTradomation: number;
+  totalContractValue: number;
+  totalAmountCollected: number;
+  totalAmountPending: number;
+  fullyPaidInstallations: number;
+  partiallyPaidInstallations: number;
+  unpaidInstallations: number;
+  pendingFollowups: number;
+  followupsDueToday: number;
+  totalReceiptsIssued: number;
+}
+
+export interface RegionReportRow {
+  region: string;
+  totalInstallations: number;
+  totalContractValue: number;
+  amountCollected: number;
+  amountPending: number;
+  collectionPercentage: number;
+}
+
+export interface DepoReportRow {
+  region: string;
+  depo: string;
+  totalInstallations: number;
+  totalContractValue: number;
+  amountCollected: number;
+  amountPending: number;
+  collectionPercentage: number;
+}
+
+export interface RepresentativeReportRow {
+  representative: string;
+  installations: number;
+  contractValue: number;
+  amountCollected: number;
+  pendingAmount: number;
+}
+
+export interface ExcelImportRow {
+  deviceType: string;
+  deviceId?: string;
+  farmerName: string;
+  farmerNumber: string;
+  farmerCNIC: string;
+  region: string;
+  depo: string;
+  location?: string;
+  sedRepresentative: string;
+  ptcRepresentative: string;
+  installationDate: Date;
+  totalAmount: number;
+  receiptId?: string;
+  paidAmount?: number;
+  followupDate?: Date;
+}
+
+export interface ImportValidationError {
+  row: number;
+  field: string;
+  message: string;
+}
+
+export interface DailyInstallationSummary {
+  total: number;
+  hygrometer: number;
+  hygrometerWithSolar: number;
+  tradomation: number;
+}
+
+export interface ChartDataPoint {
+  name: string;
+  value: number;
+}
+
+export interface DailyInstallationPoint {
+  date: string;
+  label: string;
+  hygrometer: number;
+  hygrometerWithSolar: number;
+  tradomation: number;
+  total: number;
+}
+
+export interface FilteredStatsSummary {
+  totalInstallations: number;
+  totalHygrometers: number;
+  totalHygrometersWithSolar: number;
+  totalTradomation: number;
+  totalContractValue: number;
+  amountCollected: number;
+  amountPending: number;
+  collectionPercentage: number;
+}
+
+export interface MonthlyCollectionPoint {
+  month: string;
+  amount: number;
+}
+
+export type UserRole = 'admin' | 'user';
+
+export interface AppUser {
+  id: string;
+  uid: string;
+  email: string;
+  name: string;
+  phone?: string;
+  notes?: string;
+  role: UserRole;
+  isDeleted: boolean;
+  createdAt: Date;
+  createdBy: string;
+  updatedAt: Date;
+  updatedBy: string;
+  deletedAt?: Date;
+  deletedBy?: string;
+}
+
+export interface UserFormData {
+  email: string;
+  password?: string;
+  uid?: string;
+  name: string;
+  phone?: string;
+  notes?: string;
+  linkExisting: boolean;
+  role?: UserRole;
+}

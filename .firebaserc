@@ -1,0 +1,8 @@
+{
+  "projects": {
+    "default": "sed-barns",
+    "staging": "sed-barns"
+  },
+  "targets": {},
+  "etags": {}
+}

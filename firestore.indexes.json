@@ -1,0 +1,62 @@
+{
+  "indexes": [
+    {
+      "collectionGroup": "installations",
+      "queryScope": "COLLECTION",
+      "fields": [
+        { "fieldPath": "region", "order": "ASCENDING" },
+        { "fieldPath": "installationDate", "order": "DESCENDING" }
+      ]
+    },
+    {
+      "collectionGroup": "installations",
+      "queryScope": "COLLECTION",
+      "fields": [
+        { "fieldPath": "depo", "order": "ASCENDING" },
+        { "fieldPath": "installationDate", "order": "DESCENDING" }
+      ]
+    },
+    {
+      "collectionGroup": "installations",
+      "queryScope": "COLLECTION",
+      "fields": [
+        { "fieldPath": "deviceType", "order": "ASCENDING" },
+        { "fieldPath": "installationDate", "order": "DESCENDING" }
+      ]
+    },
+    {
+      "collectionGroup": "installations",
+      "queryScope": "COLLECTION",
+      "fields": [
+        { "fieldPath": "followupDate", "order": "ASCENDING" },
+        { "fieldPath": "installationDate", "order": "DESCENDING" }
+      ]
+    },
+    {
+      "collectionGroup": "installations",
+      "queryScope": "COLLECTION",
+      "fields": [
+        { "fieldPath": "farmerName", "order": "ASCENDING" },
+        { "fieldPath": "installationDate", "order": "DESCENDING" }
+      ]
+    },
+    {
+      "collectionGroup": "installations",
+      "queryScope": "COLLECTION",
+      "fields": [
+        { "fieldPath": "region", "order": "ASCENDING" },
+        { "fieldPath": "depo", "order": "ASCENDING" },
+        { "fieldPath": "deviceType", "order": "ASCENDING" }
+      ]
+    },
+    {
+      "collectionGroup": "payments",
+      "queryScope": "COLLECTION_GROUP",
+      "fields": [
+        { "fieldPath": "receiptId", "order": "ASCENDING" },
+        { "fieldPath": "paymentDate", "order": "DESCENDING" }
+      ]
+    }
+  ],
+  "fieldOverrides": []
+}
