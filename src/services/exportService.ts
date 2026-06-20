@@ -268,6 +268,8 @@ export function mapFollowupsForExport(installations: {
   farmerNumber: string;
   region: string;
   depo: string;
+  sedRepresentative: string;
+  ptcRepresentative: string;
   amountPending: number;
   followupDate?: Date;
 }[]) {
@@ -276,6 +278,8 @@ export function mapFollowupsForExport(installations: {
     'Phone Number': i.farmerNumber,
     Region: i.region,
     Depo: i.depo,
+    'SED Representative': i.sedRepresentative,
+    'PTC Representative': i.ptcRepresentative,
     'Pending Amount': i.amountPending,
     'Followup Date': i.followupDate ? i.followupDate.toISOString().split('T')[0] : '',
   }));

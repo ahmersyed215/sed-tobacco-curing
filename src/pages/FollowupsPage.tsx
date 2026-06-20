@@ -64,6 +64,8 @@ export function FollowupsPage() {
     { field: 'farmerNumber', headerName: 'Phone Number', width: 140 },
     { field: 'region', headerName: 'Region', width: 120 },
     { field: 'depo', headerName: 'Depo', width: 120 },
+    { field: 'sedRepresentative', headerName: 'SED Rep', width: 130 },
+    { field: 'ptcRepresentative', headerName: 'PTC Rep', width: 130 },
     {
       field: 'amountPending',
       headerName: 'Pending Amount',
