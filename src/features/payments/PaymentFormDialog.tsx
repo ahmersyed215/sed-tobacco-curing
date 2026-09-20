@@ -115,7 +115,7 @@ export function PaymentFormDialog({
               label="Receipt ID"
               margin="normal"
               required
-              InputProps={{ readOnly: lockReceipt || isEdit }}
+              InputProps={{ readOnly: lockReceipt }}
               error={!!errors.receiptId || receiptUsedElsewhere === true}
               helperText={
                 errors.receiptId?.message ??
@@ -123,7 +123,9 @@ export function PaymentFormDialog({
                   ? 'Receipt ID is already used on another installation'
                   : lockReceipt
                     ? 'Same receipt as previous payments on this installation'
-                    : undefined)
+                    : isEdit
+                      ? 'Must be unique. Changing this updates all payments on this installation'
+                      : undefined)
               }
             />
           )}

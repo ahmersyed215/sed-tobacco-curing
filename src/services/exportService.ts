@@ -1,7 +1,12 @@
 import * as XLSX from 'xlsx';
-import type { ExcelImportRow, ImportResult, ImportValidationError } from '@/types';
+import type { DeviceType, ExcelImportRow, ImportResult, ImportValidationError } from '@/types';
 import { IMPORT_FILE_EXTENSIONS, REGIONS } from '@/constants';
-import { normalizeDeviceType, parseFlexibleNumber, parseImportDate } from '@/utils';
+import {
+  computeDeviceQuantity,
+  normalizeDeviceType,
+  parseFlexibleNumber,
+  parseImportDate,
+} from '@/utils';
 import { importInstallations, buildReceiptImportIndex } from './installationService';
 
 export type ImportProgressPhase = 'checking' | 'writing';
@@ -39,9 +44,39 @@ function sheetHasData(sheet: XLSX.WorkSheet): boolean {
   return rows.length > 0;
 }
 
+function sheetHeaders(sheet: XLSX.WorkSheet): string[] {
+  const rows = XLSX.utils.sheet_to_json<unknown[]>(sheet, { header: 1, defval: '' });
+  const headerRow = Array.isArray(rows[0]) ? rows[0] : [];
+  return headerRow.map((cell) => String(cell ?? '').trim().toLowerCase());
+}
+
+function pickImportSheet(workbook: XLSX.WorkBook): string {
+  const required = ['receipt id', 'device type', 'farmer name', 'total amount'];
+  const match = workbook.SheetNames.find((name) => {
+    const sheet = workbook.Sheets[name];
+    if (!sheet || !sheetHasData(sheet)) return false;
+    const headers = sheetHeaders(sheet);
+    return required.every((column) => headers.includes(column));
+  });
+
+  return (
+    match ??
+    workbook.SheetNames.find((name) => sheetHasData(workbook.Sheets[name])) ??
+    workbook.SheetNames[0]
+  );
+}
+
+function parseDeviceQuantity(value: unknown): number | null {
+  if (isCellEmpty(value)) return null;
+  const parsed = parseNumber(value);
+  if (parsed === null) return null;
+  if (parsed < 1 || Math.abs(parsed - Math.round(parsed)) > 0.001) return null;
+  return Math.round(parsed);
+}
+
 /**
  * Parse Excel (.xlsx/.xls) or Apple Numbers (.numbers) into row objects.
- * Numbers files may expose one worksheet per table — the first non-empty sheet is used.
+ * Prefers the sheet that has Receipt ID / Device Type / Farmer Name / Total Amount.
  */
 export async function parseExcelFile(file: File): Promise<Record<string, unknown>[]> {
   if (!isSupportedImportFile(file)) {
@@ -69,9 +104,7 @@ export async function parseExcelFile(file: File): Promise<Record<string, unknown
     throw new Error('The spreadsheet contains no sheets.');
   }
 
-  const sheetName =
-    workbook.SheetNames.find((name) => sheetHasData(workbook.Sheets[name])) ??
-    workbook.SheetNames[0];
+  const sheetName = pickImportSheet(workbook);
   const sheet = workbook.Sheets[sheetName];
   if (!sheet) {
     throw new Error('The spreadsheet contains no readable sheets.');
@@ -122,6 +155,9 @@ export function validateImportRows(rows: Record<string, unknown>[]): {
     const ptcRepresentative = String(getCell(row, 'PTC Representative') ?? '').trim();
     const installationDate = parseImportDate(getCell(row, 'Installation Date'));
     const totalAmount = parseNumber(getCell(row, 'Total Amount'));
+    const deviceQuantityRaw = getCell(row, 'Device Quantity') ?? getCell(row, 'Quantity');
+    const deviceQuantityPresent = !isCellEmpty(deviceQuantityRaw);
+    const parsedDeviceQuantity = deviceQuantityPresent ? parseDeviceQuantity(deviceQuantityRaw) : null;
     const followupDate = parseImportDate(getCell(row, 'Followup Date'));
     const receiptId = String(getCell(row, 'Receipt ID') ?? getCell(row, 'Latest Receipt ID') ?? '').trim();
     const paidAmount = getPaidAmount(row);
@@ -147,6 +183,13 @@ export function validateImportRows(rows: Record<string, unknown>[]): {
     }
     if (totalAmount === null || totalAmount < 0) {
       errors.push({ row: rowNum, field: 'Total Amount', message: 'Invalid amount' });
+    }
+    if (deviceQuantityPresent && parsedDeviceQuantity === null) {
+      errors.push({
+        row: rowNum,
+        field: 'Device Quantity',
+        message: 'Must be a whole number of at least 1',
+      });
     }
     if (paidAmount !== null && paidAmount < 0) {
       errors.push({ row: rowNum, field: 'Paid Amount', message: 'Cannot be negative' });
@@ -203,6 +246,9 @@ export function validateImportRows(rows: Record<string, unknown>[]): {
 
     validRows.push({
       deviceType,
+      deviceQuantity:
+        parsedDeviceQuantity ??
+        computeDeviceQuantity(deviceType as DeviceType, totalAmount!),
       deviceId: String(getCell(row, 'Device ID') ?? '').trim() || undefined,
       farmerName,
       farmerNumber,
@@ -300,6 +346,7 @@ export function exportToCsv<T extends Record<string, unknown>>(
 
 export function mapInstallationsForExport(installations: {
   deviceType: string;
+  deviceQuantity?: number;
   deviceId?: string;
   farmerName: string;
   farmerNumber: string;
@@ -319,6 +366,7 @@ export function mapInstallationsForExport(installations: {
 }[]) {
   return installations.map((i) => ({
     'Device Type': i.deviceType,
+    'Device Quantity': i.deviceQuantity ?? 1,
     'Device ID': i.deviceId ?? '',
     'Farmer Name': i.farmerName,
     'Farmer Number': i.farmerNumber,

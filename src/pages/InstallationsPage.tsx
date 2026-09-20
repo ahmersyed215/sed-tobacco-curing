@@ -25,7 +25,7 @@ import { AppSnackbar } from '@/components/common/AppSnackbar';
 import { InstallationFiltersPanel } from '@/features/installations/InstallationFiltersPanel';
 import { filterInstallations } from '@/services/statsService';
 import { exportToCsv, exportToExcel, mapInstallationsForExport } from '@/services/exportService';
-import { formatCurrency, formatDate, formatDeviceTypeLabel } from '@/utils';
+import { formatCurrency, formatDate, formatDeviceTypeLabel, getDeviceQuantity } from '@/utils';
 import type { InstallationFilters } from '@/types';
 
 const defaultFilters: InstallationFilters = {
@@ -61,11 +61,16 @@ export function InstallationsPage() {
 
   const deviceCounts = useMemo(
     () => ({
-      total: filtered.length,
-      hygrometer: filtered.filter((item) => item.deviceType === 'HYGROMETER').length,
-      hygrometerWithSolar: filtered.filter((item) => item.deviceType === 'HYGROMETER_WITH_SOLAR')
-        .length,
-      tradomation: filtered.filter((item) => item.deviceType === 'TRADOMATION').length,
+      total: filtered.reduce((sum, item) => sum + getDeviceQuantity(item), 0),
+      hygrometer: filtered
+        .filter((item) => item.deviceType === 'HYGROMETER')
+        .reduce((sum, item) => sum + getDeviceQuantity(item), 0),
+      hygrometerWithSolar: filtered
+        .filter((item) => item.deviceType === 'HYGROMETER_WITH_SOLAR')
+        .reduce((sum, item) => sum + getDeviceQuantity(item), 0),
+      tradomation: filtered
+        .filter((item) => item.deviceType === 'TRADOMATION')
+        .reduce((sum, item) => sum + getDeviceQuantity(item), 0),
     }),
     [filtered],
   );
@@ -93,6 +98,12 @@ export function InstallationsPage() {
       headerName: 'Device Type',
       width: 200,
       valueFormatter: (value: string) => formatDeviceTypeLabel(value),
+    },
+    {
+      field: 'deviceQuantity',
+      headerName: 'Qty',
+      width: 80,
+      valueGetter: (_, row) => getDeviceQuantity(row),
     },
     { field: 'latestReceiptId', headerName: 'Receipt ID', width: 140 },
     { field: 'farmerName', headerName: 'Farmer Name', width: 150 },
@@ -235,7 +246,7 @@ export function InstallationsPage() {
             sx={{ bgcolor: 'secondary.main', color: 'secondary.contrastText', fontWeight: 600 }}
           />
           <Typography variant="caption" color="text.secondary" sx={{ alignSelf: 'center', ml: 1 }}>
-            Counts update with search, region, depo, and other filters
+            Counts update with search, region, depo, and other filters. Totals count devices, not receipts.
           </Typography>
         </Stack>
       </Paper>

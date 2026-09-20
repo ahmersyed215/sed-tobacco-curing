@@ -68,6 +68,8 @@ export function useUpdateInstallation() {
     onSuccess: (_, { id }) => {
       queryClient.invalidateQueries({ queryKey: QUERY_KEYS.installations });
       queryClient.invalidateQueries({ queryKey: QUERY_KEYS.installation(id) });
+      queryClient.invalidateQueries({ queryKey: QUERY_KEYS.payments(id) });
+      queryClient.invalidateQueries({ queryKey: QUERY_KEYS.allPayments });
     },
   });
 }

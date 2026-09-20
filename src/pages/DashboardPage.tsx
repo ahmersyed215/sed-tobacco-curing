@@ -454,19 +454,19 @@ export function DashboardPage() {
           <PaymentStatusCard
             label="Fully Paid"
             count={stats.fullyPaidInstallations}
-            total={stats.totalInstallations}
+            total={stats.totalRecords}
             color={theme.palette.success.main}
           />
           <PaymentStatusCard
             label="Partially Paid"
             count={stats.partiallyPaidInstallations}
-            total={stats.totalInstallations}
+            total={stats.totalRecords}
             color={theme.palette.warning.main}
           />
           <PaymentStatusCard
             label="Unpaid"
             count={stats.unpaidInstallations}
-            total={stats.totalInstallations}
+            total={stats.totalRecords}
             color={theme.palette.error.main}
           />
         </Stack>

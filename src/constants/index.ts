@@ -40,6 +40,7 @@ export const EXCEL_COLUMNS = [
   'PTC Representative',
   'Installation Date',
   'Total Amount',
+  'Device Quantity',
   'Receipt ID',
   'Paid Amount',
   'Recovered Amount',
@@ -51,6 +52,8 @@ export const EXCEL_IMPORT_NOTES = {
   ptcRepresentative: 'Optional — leave blank if not assigned',
   dates: 'DD/MM/YYYY (e.g. 19/06/2026) or standard Excel/Numbers date cells',
   totalAmount: 'Numbers with commas/currency OK (e.g. 80,000 or Rs 80000)',
+  deviceQuantity:
+    'Optional — devices on this receipt. If blank, calculated as Total Amount ÷ unit price (Hygrometer 12,500, Solar 18,500, Tradomation 80,000)',
   depo: 'Any text — legacy depo names are accepted on import',
   receiptId:
     'Required unique key — re-importing the same Receipt ID overwrites that installation; duplicates in the file are rejected',

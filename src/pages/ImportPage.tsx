@@ -167,7 +167,11 @@ export function ImportPage() {
           Installation Date / Followup Date: {EXCEL_IMPORT_NOTES.dates}
         </Typography>
         <Typography variant="body2" color="text.secondary" mb={0.5}>
-          Total Amount: {EXCEL_IMPORT_NOTES.totalAmount} · Depo: {EXCEL_IMPORT_NOTES.depo}
+          Total Amount: {EXCEL_IMPORT_NOTES.totalAmount} · Device Quantity:{' '}
+          {EXCEL_IMPORT_NOTES.deviceQuantity}
+        </Typography>
+        <Typography variant="body2" color="text.secondary" mb={0.5}>
+          Depo: {EXCEL_IMPORT_NOTES.depo}
         </Typography>
         <Typography variant="body2" color="text.secondary" mb={0.5}>
           Receipt ID: {EXCEL_IMPORT_NOTES.receiptId}
@@ -254,6 +258,7 @@ export function ImportPage() {
                       <TableCell>Farmer</TableCell>
                       <TableCell>Region</TableCell>
                       <TableCell>Device</TableCell>
+                      <TableCell>Qty</TableCell>
                       <TableCell>Total</TableCell>
                       <TableCell>Paid</TableCell>
                       <TableCell>Recovered</TableCell>
@@ -267,6 +272,7 @@ export function ImportPage() {
                         <TableCell>{row.farmerName}</TableCell>
                         <TableCell>{row.region}</TableCell>
                         <TableCell>{row.deviceType}</TableCell>
+                        <TableCell>{row.deviceQuantity}</TableCell>
                         <TableCell>{row.totalAmount}</TableCell>
                         <TableCell>{row.paidAmount ?? 0}</TableCell>
                         <TableCell>{row.recoveredAmount ?? 0}</TableCell>

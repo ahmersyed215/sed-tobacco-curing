@@ -1,5 +1,5 @@
 import { Timestamp } from 'firebase/firestore';
-import { DEVICE_TYPE_LABELS } from '@/constants';
+import { DEVICE_PRICING, DEVICE_TYPE_LABELS } from '@/constants';
 import type { DeviceType, Installation, Payment, PaymentStatus } from '@/types';
 
 export function toDate(value: Timestamp | Date | undefined | null): Date | undefined {
@@ -318,6 +318,43 @@ export function normalizeDeviceType(value: string): Installation['deviceType'] |
 
 export function formatDeviceTypeLabel(deviceType: string): string {
   return DEVICE_TYPE_LABELS[deviceType as DeviceType] ?? deviceType;
+}
+
+export function getDeviceUnitPrice(deviceType: DeviceType): number {
+  return DEVICE_PRICING[deviceType].totalAmount;
+}
+
+/**
+ * Devices on a receipt: Total Amount ÷ unit price (Hygrometer 12,500 / Tradomation 80,000),
+ * rounded to the nearest whole number and at least 1.
+ */
+export function computeDeviceQuantity(deviceType: DeviceType, totalAmount: number): number {
+  const unit = getDeviceUnitPrice(deviceType);
+  if (!unit || !Number.isFinite(totalAmount) || totalAmount <= 0) return 1;
+  return Math.max(1, Math.round(totalAmount / unit));
+}
+
+export function resolveDeviceQuantity(
+  deviceType: DeviceType,
+  totalAmount: number,
+  explicit?: number | null,
+): number {
+  if (typeof explicit === 'number' && Number.isFinite(explicit) && explicit >= 1) {
+    return Math.round(explicit);
+  }
+  return computeDeviceQuantity(deviceType, totalAmount);
+}
+
+export function getDeviceQuantity(installation: {
+  deviceType: DeviceType;
+  totalAmount: number;
+  deviceQuantity?: number;
+}): number {
+  return resolveDeviceQuantity(
+    installation.deviceType,
+    installation.totalAmount,
+    installation.deviceQuantity,
+  );
 }
 
 export function generateReceiptId(prefix: string, year: number, sequence: number): string {

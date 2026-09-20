@@ -16,12 +16,27 @@ import type {
 import { DEVICE_TYPE_LABELS, NEAR_FUTURE_FOLLOWUP_DAYS } from '@/constants';
 import {
   ensureDate,
+  getDeviceQuantity,
   isFollowupDue,
   isFollowupNearOrOverdue,
   isSameCalendarDay,
   isWithinDateRange,
   toDateKey,
 } from '@/utils';
+
+function deviceQty(item: InstallationWithCalculations): number {
+  return getDeviceQuantity(item);
+}
+
+function sumDeviceQty(
+  items: InstallationWithCalculations[],
+  predicate?: (item: InstallationWithCalculations) => boolean,
+): number {
+  return items.reduce((sum, item) => {
+    if (predicate && !predicate(item)) return sum;
+    return sum + deviceQty(item);
+  }, 0);
+}
 
 export function filterInstallations(
   installations: InstallationWithCalculations[],
@@ -97,11 +112,13 @@ export function computeDashboardStats(
   const totalAmountCollected = installations.reduce((sum, i) => sum + i.amountReceived, 0);
 
   return {
-    totalInstallations: installations.length,
-    totalHygrometers: installations.filter((i) => i.deviceType === 'HYGROMETER').length,
-    totalHygrometersWithSolar: installations.filter((i) => i.deviceType === 'HYGROMETER_WITH_SOLAR')
-      .length,
-    totalTradomation: installations.filter((i) => i.deviceType === 'TRADOMATION').length,
+    totalInstallations: sumDeviceQty(installations),
+    totalHygrometers: sumDeviceQty(installations, (i) => i.deviceType === 'HYGROMETER'),
+    totalHygrometersWithSolar: sumDeviceQty(
+      installations,
+      (i) => i.deviceType === 'HYGROMETER_WITH_SOLAR',
+    ),
+    totalTradomation: sumDeviceQty(installations, (i) => i.deviceType === 'TRADOMATION'),
     totalContractValue,
     totalAmountCollected,
     totalAmountPending: totalContractValue - totalAmountCollected,
@@ -115,6 +132,7 @@ export function computeDashboardStats(
       isFollowupDue(i.followupDate, i.amountPending),
     ).length,
     totalReceiptsIssued: allPayments.length,
+    totalRecords: installations.length,
   };
 }
 
@@ -128,7 +146,7 @@ export function getInstallationsByDepo(
 
   const counts = filtered.reduce<Record<string, number>>((acc, item) => {
     const depo = item.depo?.trim() || 'Unassigned';
-    acc[depo] = (acc[depo] ?? 0) + 1;
+    acc[depo] = (acc[depo] ?? 0) + deviceQty(item);
     return acc;
   }, {});
 
@@ -151,7 +169,7 @@ export function getInstallationsPerDay(
       item.deviceType === 'HYGROMETER_WITH_SOLAR' ||
       item.deviceType === 'TRADOMATION'
     ) {
-      acc[date][item.deviceType] += 1;
+      acc[date][item.deviceType] += deviceQty(item);
     }
 
     return acc;
@@ -188,11 +206,13 @@ export function computeFilteredStatsSummary(
   const amountPending = totalContractValue - amountCollected;
 
   return {
-    totalInstallations: installations.length,
-    totalHygrometers: installations.filter((i) => i.deviceType === 'HYGROMETER').length,
-    totalHygrometersWithSolar: installations.filter((i) => i.deviceType === 'HYGROMETER_WITH_SOLAR')
-      .length,
-    totalTradomation: installations.filter((i) => i.deviceType === 'TRADOMATION').length,
+    totalInstallations: sumDeviceQty(installations),
+    totalHygrometers: sumDeviceQty(installations, (i) => i.deviceType === 'HYGROMETER'),
+    totalHygrometersWithSolar: sumDeviceQty(
+      installations,
+      (i) => i.deviceType === 'HYGROMETER_WITH_SOLAR',
+    ),
+    totalTradomation: sumDeviceQty(installations, (i) => i.deviceType === 'TRADOMATION'),
     totalContractValue,
     amountCollected,
     amountPending,
@@ -216,7 +236,7 @@ export function getDepoOptions(
 export function getInstallationsByRegion(installations: InstallationWithCalculations[]): ChartDataPoint[] {
   const counts = installations.reduce<Record<string, number>>((acc, item) => {
     const regionName = item.region?.trim() || 'Unassigned';
-    acc[regionName] = (acc[regionName] ?? 0) + 1;
+    acc[regionName] = (acc[regionName] ?? 0) + deviceQty(item);
     return acc;
   }, {});
 
@@ -225,7 +245,7 @@ export function getInstallationsByRegion(installations: InstallationWithCalculat
 
 export function getInstallationsByDeviceType(installations: InstallationWithCalculations[]): ChartDataPoint[] {
   const counts = installations.reduce<Record<string, number>>((acc, item) => {
-    acc[item.deviceType] = (acc[item.deviceType] ?? 0) + 1;
+    acc[item.deviceType] = (acc[item.deviceType] ?? 0) + deviceQty(item);
     return acc;
   }, {});
 
@@ -287,7 +307,7 @@ export function computeRegionReport(installations: InstallationWithCalculations[
 
     return {
       region,
-      totalInstallations: items.length,
+      totalInstallations: sumDeviceQty(items),
       totalContractValue,
       amountCollected,
       amountPending,
@@ -313,7 +333,7 @@ export function computeDepoReport(installations: InstallationWithCalculations[])
     return {
       region,
       depo,
-      totalInstallations: items.length,
+      totalInstallations: sumDeviceQty(items),
       totalContractValue,
       amountCollected,
       amountPending,
@@ -336,7 +356,7 @@ export function computeRepresentativeReport(
   return Object.entries(grouped)
     .map(([representative, items]) => ({
       representative,
-      installations: items.length,
+      installations: sumDeviceQty(items),
       contractValue: items.reduce((sum, i) => sum + i.totalAmount, 0),
       amountCollected: items.reduce((sum, i) => sum + i.amountReceived, 0),
       pendingAmount: items.reduce((sum, i) => sum + i.amountPending, 0),
@@ -378,9 +398,9 @@ export function summarizeInstallationsOnDate(
   );
 
   return {
-    total: onDate.length,
-    hygrometer: onDate.filter((item) => item.deviceType === 'HYGROMETER').length,
-    hygrometerWithSolar: onDate.filter((item) => item.deviceType === 'HYGROMETER_WITH_SOLAR').length,
-    tradomation: onDate.filter((item) => item.deviceType === 'TRADOMATION').length,
+    total: sumDeviceQty(onDate),
+    hygrometer: sumDeviceQty(onDate, (item) => item.deviceType === 'HYGROMETER'),
+    hygrometerWithSolar: sumDeviceQty(onDate, (item) => item.deviceType === 'HYGROMETER_WITH_SOLAR'),
+    tradomation: sumDeviceQty(onDate, (item) => item.deviceType === 'TRADOMATION'),
   };
 }

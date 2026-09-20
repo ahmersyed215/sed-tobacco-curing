@@ -31,6 +31,7 @@ import { RECEIPT_PREFIX } from '@/constants';
 import {
   calculateAmounts,
   generateReceiptId,
+  resolveDeviceQuantity,
   toDate,
   toTimestamp,
   withInstallationCalculations,
@@ -45,6 +46,7 @@ function mapInstallation(id: string, data: DocumentData): Installation {
   return {
     id,
     deviceType: data.deviceType,
+    deviceQuantity: resolveDeviceQuantity(data.deviceType, data.totalAmount, data.deviceQuantity),
     deviceId: data.deviceId || undefined,
     farmerName: data.farmerName,
     farmerNumber: data.farmerNumber,
@@ -170,6 +172,7 @@ export async function createInstallation(data: InstallationFormData, userEmail: 
 
   batch.set(docRef, {
     deviceType: data.deviceType,
+    deviceQuantity: resolveDeviceQuantity(data.deviceType, data.totalAmount, data.deviceQuantity),
     deviceId: data.deviceId?.trim() || null,
     farmerName: data.farmerName.trim(),
     farmerNumber: data.farmerNumber.trim(),
@@ -204,8 +207,22 @@ export async function createInstallation(data: InstallationFormData, userEmail: 
 }
 
 export async function updateInstallation(id: string, data: InstallationFormData): Promise<void> {
-  await updateDoc(doc(db, INSTALLATIONS, id), {
+  const receiptId = data.receiptId?.trim() ?? '';
+  if (!receiptId) {
+    throw new Error('Receipt ID is required');
+  }
+
+  const usedElsewhere = await checkReceiptIdUsedElsewhere(receiptId, id);
+  if (usedElsewhere) {
+    throw new Error('Receipt ID is already used on another installation');
+  }
+
+  const payments = await fetchPaymentsByInstallationId(id);
+  const batch = writeBatch(db);
+
+  batch.update(doc(db, INSTALLATIONS, id), {
     deviceType: data.deviceType,
+    deviceQuantity: resolveDeviceQuantity(data.deviceType, data.totalAmount, data.deviceQuantity),
     deviceId: data.deviceId?.trim() || null,
     farmerName: data.farmerName.trim(),
     farmerNumber: data.farmerNumber.trim(),
@@ -218,8 +235,16 @@ export async function updateInstallation(id: string, data: InstallationFormData)
     installationDate: toTimestamp(data.installationDate),
     totalAmount: data.totalAmount,
     followupDate: toTimestamp(data.followupDate ?? null),
+    latestReceiptId: receiptId,
     updatedAt: Timestamp.now(),
   });
+
+  payments.forEach((payment) => {
+    if (payment.receiptId === receiptId) return;
+    batch.update(doc(db, INSTALLATIONS, id, PAYMENTS, payment.id), { receiptId });
+  });
+
+  await batch.commit();
 }
 
 export async function deleteInstallation(id: string): Promise<void> {
@@ -240,6 +265,28 @@ export async function updateFollowupDate(id: string, followupDate: Date | null):
   });
 }
 
+async function latestReceiptIdTakenByOtherInstallation(
+  receiptId: string,
+  excludeInstallationId?: string,
+): Promise<boolean> {
+  const normalized = receiptId.trim();
+  if (!normalized) return false;
+
+  try {
+    const snapshot = await getDocs(
+      query(collection(db, INSTALLATIONS), where('latestReceiptId', '==', normalized)),
+    );
+    return snapshot.docs.some((d) => d.id !== excludeInstallationId);
+  } catch {
+    const snapshot = await getDocs(collection(db, INSTALLATIONS));
+    return snapshot.docs.some(
+      (d) =>
+        d.id !== excludeInstallationId &&
+        String(d.data().latestReceiptId ?? '').trim() === normalized,
+    );
+  }
+}
+
 export async function checkReceiptIdExists(receiptId: string, excludePaymentId?: string): Promise<boolean> {
   const normalized = receiptId.trim();
   if (!normalized) return false;
@@ -249,16 +296,22 @@ export async function checkReceiptIdExists(receiptId: string, excludePaymentId?:
       query(collectionGroup(db, PAYMENTS), where('receiptId', '==', normalized)),
     );
 
-    if (excludePaymentId) {
-      return snapshot.docs.some((d) => d.id !== excludePaymentId);
-    }
-    return !snapshot.empty;
+    const paymentTaken = excludePaymentId
+      ? snapshot.docs.some((d) => d.id !== excludePaymentId)
+      : !snapshot.empty;
+    if (paymentTaken) return true;
   } catch {
     const payments = await fetchAllPaymentsFallback();
-    return payments.some(
-      (payment) => payment.receiptId === normalized && payment.id !== excludePaymentId,
-    );
+    if (
+      payments.some(
+        (payment) => payment.receiptId === normalized && payment.id !== excludePaymentId,
+      )
+    ) {
+      return true;
+    }
   }
+
+  return latestReceiptIdTakenByOtherInstallation(normalized);
 }
 
 /** True when the receipt is used on a different installation (same receipt on one installation is allowed). */
@@ -275,20 +328,27 @@ export async function checkReceiptIdUsedElsewhere(
       query(collectionGroup(db, PAYMENTS), where('receiptId', '==', normalized)),
     );
 
-    return snapshot.docs.some((paymentDoc) => {
+    const paymentTaken = snapshot.docs.some((paymentDoc) => {
       if (excludePaymentId && paymentDoc.id === excludePaymentId) return false;
       const parentInstallationId = paymentDoc.ref.parent.parent?.id;
       return parentInstallationId !== installationId;
     });
+    if (paymentTaken) return true;
   } catch {
     const payments = await fetchAllPaymentsFallback();
-    return payments.some(
-      (payment) =>
-        payment.receiptId === normalized &&
-        payment.installationId !== installationId &&
-        payment.id !== excludePaymentId,
-    );
+    if (
+      payments.some(
+        (payment) =>
+          payment.receiptId === normalized &&
+          payment.installationId !== installationId &&
+          payment.id !== excludePaymentId,
+      )
+    ) {
+      return true;
+    }
   }
+
+  return latestReceiptIdTakenByOtherInstallation(normalized, installationId);
 }
 
 export async function generateNextReceiptId(deviceType: DeviceType): Promise<string> {
@@ -384,13 +444,22 @@ export async function updatePayment(
     throw new Error('Receipt ID is already used on another installation');
   }
 
-  await updateDoc(doc(db, INSTALLATIONS, installationId, PAYMENTS, paymentId), {
+  const payments = await fetchPaymentsByInstallationId(installationId);
+  const batch = writeBatch(db);
+
+  batch.update(doc(db, INSTALLATIONS, installationId, PAYMENTS, paymentId), {
     receiptId,
     amount: data.amount,
     paymentDate: toTimestamp(data.paymentDate),
     notes: data.notes?.trim() || null,
   });
 
+  payments.forEach((payment) => {
+    if (payment.id === paymentId || payment.receiptId === receiptId) return;
+    batch.update(doc(db, INSTALLATIONS, installationId, PAYMENTS, payment.id), { receiptId });
+  });
+
+  await batch.commit();
   await syncLatestReceiptId(installationId);
 }
 
@@ -508,6 +577,11 @@ export async function importInstallations(
       ref: docRef,
       data: {
         deviceType: row.deviceType,
+        deviceQuantity: resolveDeviceQuantity(
+          row.deviceType as DeviceType,
+          row.totalAmount,
+          row.deviceQuantity,
+        ),
         deviceId: row.deviceId?.trim() || null,
         farmerName: row.farmerName.trim(),
         farmerNumber: row.farmerNumber.trim(),

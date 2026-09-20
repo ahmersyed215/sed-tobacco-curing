@@ -18,6 +18,7 @@ import { REGIONS, REGION_NAMES, DEVICE_TYPES, DEVICE_TYPE_LABELS, DEVICE_PRICING
 import type { DeviceType, InstallationFormData, InstallationWithCalculations } from '@/types';
 import { formatAmountInput, formatCurrency, formatDateInput, parseAmountInput } from '@/utils';
 import { emptyFieldHighlightSx, isEmptyFormValue } from '@/utils/formFieldStyles';
+import { useCheckReceiptId, useCheckReceiptIdUsedElsewhere } from '@/hooks/useInstallations';
 
 const baseSchema = yup.object({
   deviceType: yup.string().oneOf(DEVICE_TYPES).required('Device type is required'),
@@ -31,13 +32,19 @@ const baseSchema = yup.object({
   sedRepresentative: yup.string().required('SED representative is required'),
   ptcRepresentative: yup.string().optional(),
   installationDate: yup.date().required('Installation date is required'),
+  deviceQuantity: yup
+    .number()
+    .typeError('Device quantity is required')
+    .integer('Device quantity must be a whole number')
+    .min(1, 'At least 1 device')
+    .required('Device quantity is required'),
   totalAmount: yup
     .number()
     .typeError('Total amount is required')
     .moreThan(0, 'Total amount must be greater than 0')
     .required('Total amount is required'),
   followupDate: yup.date().nullable().optional(),
-  receiptId: yup.string().optional(),
+  receiptId: yup.string().trim().required('Receipt ID is required'),
   paidAmount: yup.number().min(0, 'Paid amount cannot be negative').optional(),
 });
 
@@ -56,9 +63,6 @@ function createSchema(isCreate: boolean) {
           return !!value;
         },
       ),
-    receiptId: isCreate
-      ? yup.string().trim().required('Receipt ID is required')
-      : yup.string().optional(),
     paidAmount: yup
       .number()
       .min(0)
@@ -68,6 +72,14 @@ function createSchema(isCreate: boolean) {
         return (value ?? 0) <= totalAmount;
       }),
   });
+}
+
+function getInitialReceiptId(initialData?: InstallationWithCalculations): string {
+  return (
+    initialData?.latestReceiptId?.trim() ||
+    initialData?.receiptIds.find((id) => id.trim())?.trim() ||
+    ''
+  );
 }
 
 function scrollToFirstError(formErrors: FieldErrors<InstallationFormData>) {
@@ -122,16 +134,30 @@ export function InstallationForm({
       sedRepresentative: initialData?.sedRepresentative ?? '',
       ptcRepresentative: initialData?.ptcRepresentative ?? '',
       installationDate: initialData?.installationDate ?? new Date(),
+      deviceQuantity: initialData?.deviceQuantity ?? 1,
       totalAmount: initialData?.totalAmount ?? (isCreate ? createPricing.totalAmount : 0),
       followupDate: initialData?.followupDate ?? null,
-      receiptId: '',
+      receiptId: getInitialReceiptId(initialData),
       paidAmount: isCreate ? createPricing.defaultPaidAmount : 0,
     },
   });
 
   const values = watch();
+  const receiptIdValue = values.receiptId ?? '';
+  const { data: receiptExists } = useCheckReceiptId(
+    receiptIdValue,
+    isCreate && receiptIdValue.trim().length > 0,
+  );
+  const { data: receiptUsedElsewhere } = useCheckReceiptIdUsedElsewhere(
+    initialData?.id ?? '',
+    receiptIdValue,
+    !isCreate && receiptIdValue.trim().length > 0,
+  );
+  const receiptDuplicate = isCreate ? receiptExists === true : receiptUsedElsewhere === true;
+
   const selectedRegion = values.region;
   const deviceType = values.deviceType;
+  const deviceQuantity = values.deviceQuantity ?? 1;
   const totalAmount = values.totalAmount;
   const paidAmount = values.paidAmount ?? 0;
   const followupRequired = isCreate && paidAmount === 0;
@@ -158,9 +184,10 @@ export function InstallationForm({
   useEffect(() => {
     if (!isCreate) return;
     const pricing = DEVICE_PRICING[deviceType];
-    setValue('totalAmount', pricing.totalAmount);
-    setValue('paidAmount', pricing.defaultPaidAmount);
-  }, [deviceType, isCreate, setValue]);
+    const qty = Math.max(1, Math.round(Number(deviceQuantity) || 1));
+    setValue('totalAmount', pricing.totalAmount * qty);
+    setValue('paidAmount', pricing.defaultPaidAmount * qty);
+  }, [deviceType, deviceQuantity, isCreate, setValue]);
 
   return (
     <Paper sx={{ p: { xs: 2, md: 3 }, borderRadius: 3 }}>
@@ -194,6 +221,30 @@ export function InstallationForm({
                     </MenuItem>
                   ))}
                 </TextField>
+              )}
+            />
+          </Grid>
+          <Grid item xs={12} sm={6}>
+            <Controller
+              name="deviceQuantity"
+              control={control}
+              render={({ field }) => (
+                <TextField
+                  {...field}
+                  type="number"
+                  fullWidth
+                  label="Device Quantity"
+                  required
+                  inputProps={{ min: 1, step: 1 }}
+                  onChange={(e) => field.onChange(Number(e.target.value) || 0)}
+                  error={!!errors.deviceQuantity}
+                  helperText={
+                    errors.deviceQuantity?.message ??
+                    (isCreate
+                      ? 'Devices on this receipt. Total defaults to unit price × quantity.'
+                      : 'Devices installed on this receipt')
+                  }
+                />
               )}
             />
           </Grid>
@@ -380,29 +431,33 @@ export function InstallationForm({
               )}
             />
           </Grid>
-          {isCreate && (
-            <Grid item xs={12} sm={6}>
-              <Controller
-                name="receiptId"
-                control={control}
-                render={({ field }) => (
-                  <TextField
-                    {...field}
-                    fullWidth
-                    label="Receipt ID"
-                    placeholder="Enter receipt number from book"
-                    required
-                    error={!!errors.receiptId}
-                    helperText={
-                      errors.receiptId?.message ??
-                      'From your receipt book — later payments use the same ID'
-                    }
-                    sx={highlight('receiptId', field.value)}
-                  />
-                )}
-              />
-            </Grid>
-          )}
+          <Grid item xs={12} sm={6}>
+            <Controller
+              name="receiptId"
+              control={control}
+              render={({ field }) => (
+                <TextField
+                  {...field}
+                  fullWidth
+                  label="Receipt ID"
+                  placeholder="Enter receipt number from book"
+                  required
+                  error={!!errors.receiptId || receiptDuplicate}
+                  helperText={
+                    errors.receiptId?.message ??
+                    (receiptDuplicate
+                      ? isCreate
+                        ? 'Receipt ID already exists in the system'
+                        : 'Receipt ID is already used on another installation'
+                      : isCreate
+                        ? 'From your receipt book — later payments use the same ID'
+                        : 'Must be unique. Changing this updates all payments on this installation')
+                  }
+                  sx={highlight('receiptId', field.value)}
+                />
+              )}
+            />
+          </Grid>
           <Grid item xs={12} sm={6}>
             <Controller
               name="totalAmount"
@@ -415,7 +470,12 @@ export function InstallationForm({
                   placeholder="e.g. 12500 or 12,500"
                   inputMode="decimal"
                   error={!!errors.totalAmount}
-                  helperText={errors.totalAmount?.message}
+                  helperText={
+                    errors.totalAmount?.message ??
+                    (isCreate
+                      ? `Default ${formatCurrency(DEVICE_PRICING[deviceType].totalAmount)} × ${deviceQuantity}. Edit for concessions.`
+                      : undefined)
+                  }
                   value={formatAmountInput(field.value, { emptyWhenZero: isCreate })}
                   onChange={(e) => field.onChange(parseAmountInput(e.target.value))}
                   onBlur={field.onBlur}
@@ -499,7 +559,7 @@ export function InstallationForm({
         </Grid>
 
         <Box mt={3} display="flex" gap={2}>
-          <Button type="submit" variant="contained" size="large" disabled={loading}>
+          <Button type="submit" variant="contained" size="large" disabled={loading || receiptDuplicate}>
             {loading ? 'Saving...' : initialData ? 'Update Installation' : 'Create Installation'}
           </Button>
         </Box>

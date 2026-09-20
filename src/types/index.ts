@@ -5,6 +5,7 @@ export type PaymentStatus = 'PAID' | 'PARTIALLY_PAID' | 'UNPAID';
 export interface Installation {
   id: string;
   deviceType: DeviceType;
+  deviceQuantity: number;
   deviceId?: string;
   farmerName: string;
   farmerNumber: string;
@@ -42,6 +43,7 @@ export interface InstallationWithCalculations extends Installation {
 
 export interface InstallationFormData {
   deviceType: DeviceType;
+  deviceQuantity: number;
   deviceId?: string;
   farmerName: string;
   farmerNumber: string;
@@ -54,7 +56,7 @@ export interface InstallationFormData {
   installationDate: Date;
   totalAmount: number;
   followupDate?: Date | null;
-  receiptId?: string;
+  receiptId: string;
   paidAmount?: number;
   autoGenerateReceipt?: boolean;
 }
@@ -96,6 +98,7 @@ export interface DashboardStats {
   pendingFollowups: number;
   followupsDueToday: number;
   totalReceiptsIssued: number;
+  totalRecords: number;
 }
 
 export interface RegionReportRow {
@@ -127,6 +130,7 @@ export interface RepresentativeReportRow {
 
 export interface ExcelImportRow {
   deviceType: string;
+  deviceQuantity: number;
   deviceId?: string;
   farmerName: string;
   farmerNumber: string;

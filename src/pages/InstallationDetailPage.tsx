@@ -64,6 +64,7 @@ export function InstallationDetailPage() {
 
         <Grid container spacing={2}>
           <DetailRow label="Device Type" value={formatDeviceTypeLabel(installation.deviceType)} />
+          <DetailRow label="Device Quantity" value={String(installation.deviceQuantity ?? 1)} />
           <DetailRow label="Device ID" value={installation.deviceId ?? ''} />
           <DetailRow label="Farmer Number" value={installation.farmerNumber} />
           <DetailRow label="CNIC" value={installation.farmerCNIC} />
