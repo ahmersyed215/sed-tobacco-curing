@@ -39,13 +39,23 @@ export function InstallationFiltersPanel({ filters, onChange, installations }: P
         Filters & Search
       </Typography>
       <Grid container spacing={2}>
-        <Grid item xs={12} md={4}>
+        <Grid item xs={12} md={3}>
           <TextField
             fullWidth
             label="Search"
-            placeholder="Farmer name, CNIC, receipt ID, phone, device ID..."
+            placeholder="Farmer name, CNIC, phone, device ID..."
             value={filters.search ?? ''}
             onChange={(e) => update({ search: e.target.value })}
+            size="small"
+          />
+        </Grid>
+        <Grid item xs={12} sm={6} md={2}>
+          <TextField
+            fullWidth
+            label="Receipt ID"
+            placeholder="Filter by receipt ID"
+            value={filters.receiptId ?? ''}
+            onChange={(e) => update({ receiptId: e.target.value })}
             size="small"
           />
         </Grid>
@@ -213,6 +223,7 @@ export function InstallationFiltersPanel({ filters, onChange, installations }: P
                 fullyPaidOnly: false,
                 followupDueOnly: false,
                 search: '',
+                receiptId: '',
               })
             }
           >

@@ -16,6 +16,7 @@ import {
   type DocumentData,
 } from 'firebase/firestore';
 import { db } from '@/firebase/config';
+import { BATCH_OP_LIMIT, commitBatchedOps, type BatchWriteOp } from '@/firebase/batchUtils';
 import type {
   Installation,
   InstallationFormData,
@@ -24,6 +25,7 @@ import type {
   PaymentFormData,
   DeviceType,
   ExcelImportRow,
+  ImportResult,
 } from '@/types';
 import { RECEIPT_PREFIX } from '@/constants';
 import {
@@ -31,6 +33,7 @@ import {
   generateReceiptId,
   toDate,
   toTimestamp,
+  withInstallationCalculations,
 } from '@/utils';
 
 const INSTALLATIONS = 'installations';
@@ -118,12 +121,7 @@ export async function fetchInstallationsWithCalculations(): Promise<Installation
   return installationsSnap.docs.map((docSnap) => {
     const installation = mapInstallation(docSnap.id, docSnap.data());
     const installationPayments = paymentsByInstallation[installation.id] ?? [];
-    const calculations = calculateAmounts(installation.totalAmount, installationPayments);
-
-    return {
-      ...installation,
-      ...calculations,
-    };
+    return withInstallationCalculations(installation, installationPayments);
   });
 }
 
@@ -133,9 +131,7 @@ export async function fetchInstallationById(id: string): Promise<InstallationWit
 
   const installation = mapInstallation(docSnap.id, docSnap.data());
   const payments = await fetchPaymentsByInstallationId(id);
-  const calculations = calculateAmounts(installation.totalAmount, payments);
-
-  return { ...installation, ...calculations };
+  return withInstallationCalculations(installation, payments);
 }
 
 export async function fetchPaymentsByInstallationId(installationId: string): Promise<Payment[]> {
@@ -332,6 +328,10 @@ export async function previewNextReceiptId(deviceType: DeviceType): Promise<stri
 
 async function syncLatestReceiptId(installationId: string): Promise<void> {
   const payments = await fetchPaymentsByInstallationId(installationId);
+  // Only update from payments when at least one exists — unpaid imports keep
+  // the receipt ID stored on the installation document.
+  if (payments.length === 0) return;
+
   const { latestReceiptId } = calculateAmounts(0, payments);
 
   await updateDoc(doc(db, INSTALLATIONS, installationId), {
@@ -399,27 +399,114 @@ export async function deletePayment(installationId: string, paymentId: string): 
   await syncLatestReceiptId(installationId);
 }
 
-export async function importInstallations(rows: ExcelImportRow[], userEmail: string): Promise<number> {
+type ExistingReceiptMatch = {
+  installationId: string;
+  createdAt: Date;
+  payments: Payment[];
+};
+
+/**
+ * Build receiptId → installation match. Receipt ID is the unique import key.
+ * Payments with the same receipt on different installations are treated as a conflict.
+ */
+export async function buildReceiptImportIndex(): Promise<Map<string, ExistingReceiptMatch>> {
+  const [installationsSnap, payments] = await Promise.all([
+    getDocs(collection(db, INSTALLATIONS)),
+    fetchAllPayments(),
+  ]);
+
+  const installationsById = new Map(
+    installationsSnap.docs.map((d) => [d.id, mapInstallation(d.id, d.data())]),
+  );
+  const index = new Map<string, ExistingReceiptMatch>();
+
+  for (const payment of payments) {
+    const receiptId = payment.receiptId?.trim();
+    if (!receiptId) continue;
+
+    const existing = index.get(receiptId);
+    if (existing) {
+      if (existing.installationId !== payment.installationId) {
+        throw new Error(
+          `Receipt ID "${receiptId}" is linked to multiple installations. Fix the data before importing.`,
+        );
+      }
+      existing.payments.push(payment);
+      continue;
+    }
+
+    const installation = installationsById.get(payment.installationId);
+    index.set(receiptId, {
+      installationId: payment.installationId,
+      createdAt: installation?.createdAt ?? payment.createdAt,
+      payments: [payment],
+    });
+  }
+
+  // Installations with a receipt but no payment docs yet
+  for (const installation of installationsById.values()) {
+    const receiptId = installation.latestReceiptId?.trim();
+    if (!receiptId || index.has(receiptId)) continue;
+    index.set(receiptId, {
+      installationId: installation.id,
+      createdAt: installation.createdAt,
+      payments: [],
+    });
+  }
+
+  return index;
+}
+
+export async function importInstallations(
+  rows: ExcelImportRow[],
+  userEmail: string,
+  onProgress?: (done: number, total: number) => void,
+  existingByReceipt?: Map<string, ExistingReceiptMatch>,
+): Promise<ImportResult> {
   if (!userEmail.trim()) {
     throw new Error('You must be logged in to import records.');
   }
 
-  // Each row may create an installation + payment (2 writes). Firestore batch limit is 500.
-  const batchSize = 200;
-  let imported = 0;
+  const receiptIndex = existingByReceipt ?? (await buildReceiptImportIndex());
+  const now = Timestamp.now();
+  const ops: BatchWriteOp[] = [];
+  let created = 0;
+  let updated = 0;
 
-  for (let i = 0; i < rows.length; i += batchSize) {
-    const batch = writeBatch(db);
-    const chunk = rows.slice(i, i + batchSize);
-    const now = Timestamp.now();
+  rows.forEach((row) => {
+    const paidAmount = row.paidAmount ?? 0;
+    const recoveredAmount = row.recoveredAmount ?? 0;
+    const receiptId = row.receiptId?.trim() ?? '';
+    if (!receiptId) {
+      throw new Error('Receipt ID is required on every imported installation');
+    }
 
-    chunk.forEach((row) => {
-      const docRef = doc(collection(db, INSTALLATIONS));
-      const paidAmount = row.paidAmount ?? 0;
-      const receiptId = row.receiptId?.trim();
-      const hasPayment = paidAmount > 0 && !!receiptId;
+    const existing = receiptIndex.get(receiptId);
+    const isUpdate = !!existing;
+    const docRef = existing
+      ? doc(db, INSTALLATIONS, existing.installationId)
+      : doc(collection(db, INSTALLATIONS));
 
-      batch.set(docRef, {
+    if (isUpdate) {
+      updated += 1;
+      // Replace only payments for this receipt; leave other receipts on the install intact.
+      existing.payments.forEach((payment) => {
+        ops.push({
+          type: 'delete',
+          ref: doc(db, INSTALLATIONS, existing.installationId, PAYMENTS, payment.id),
+        });
+      });
+    } else {
+      created += 1;
+    }
+
+    const hasPaidPayment = paidAmount > 0;
+    const hasRecoveredPayment = recoveredAmount > 0;
+
+    ops.push({
+      type: 'set',
+      ref: docRef,
+      data: {
         deviceType: row.deviceType,
         deviceId: row.deviceId?.trim() || null,
         farmerName: row.farmerName.trim(),
@@ -433,29 +520,64 @@ export async function importInstallations(rows: ExcelImportRow[], userEmail: str
         installationDate: toTimestamp(row.installationDate),
         totalAmount: row.totalAmount,
         followupDate: toTimestamp(row.followupDate ?? null),
-        latestReceiptId: hasPayment ? receiptId : null,
-        createdAt: now,
+        latestReceiptId: receiptId,
+        createdAt: isUpdate ? toTimestamp(existing.createdAt) : now,
         updatedAt: now,
-      });
+      },
+    });
 
-      if (hasPayment) {
-        const paymentRef = doc(collection(db, INSTALLATIONS, docRef.id, PAYMENTS));
-        batch.set(paymentRef, {
+    if (hasPaidPayment) {
+      const paymentRef = doc(collection(db, INSTALLATIONS, docRef.id, PAYMENTS));
+      ops.push({
+        type: 'set',
+        ref: paymentRef,
+        data: {
           receiptId,
           amount: paidAmount,
           paymentDate: toTimestamp(row.installationDate),
           notes: 'Imported from Excel',
           createdAt: now,
           createdBy: userEmail,
-        });
-      }
-    });
+        },
+      });
+    }
 
-    await batch.commit();
-    imported += chunk.length;
-  }
+    if (hasRecoveredPayment) {
+      const recoveredRef = doc(collection(db, INSTALLATIONS, docRef.id, PAYMENTS));
+      ops.push({
+        type: 'set',
+        ref: recoveredRef,
+        data: {
+          receiptId,
+          amount: recoveredAmount,
+          paymentDate: toTimestamp(row.installationDate),
+          notes: 'Recovered amount',
+          createdAt: now,
+          createdBy: userEmail,
+        },
+      });
+    }
+  });
 
-  return imported;
+  let lastReportedRows = 0;
+  await commitBatchedOps(ops, {
+    batchSize: BATCH_OP_LIMIT,
+    onProgress: onProgress
+      ? (doneOps, totalOps) => {
+          const doneRows = Math.min(
+            rows.length,
+            Math.round((doneOps / Math.max(totalOps, 1)) * rows.length),
+          );
+          if (doneRows !== lastReportedRows) {
+            lastReportedRows = doneRows;
+            onProgress(doneRows, rows.length);
+          }
+        }
+      : undefined,
+  });
+
+  onProgress?.(rows.length, rows.length);
+  return { created, updated, total: rows.length };
 }
 
 export async function fetchUniqueRepresentatives(): Promise<{

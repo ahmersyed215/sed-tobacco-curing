@@ -6,6 +6,7 @@ import {
   DialogActions,
   DialogContent,
   DialogTitle,
+  LinearProgress,
   TextField,
   Typography,
 } from '@mui/material';
@@ -19,6 +20,7 @@ export function AdminDangerZone() {
   const deleteMutation = useDeleteAllApplicationData();
   const [open, setOpen] = useState(false);
   const [confirmValue, setConfirmValue] = useState('');
+  const [progress, setProgress] = useState<{ done: number; total: number } | null>(null);
   const [snackbar, setSnackbar] = useState<{
     open: boolean;
     message: string;
@@ -26,8 +28,11 @@ export function AdminDangerZone() {
   }>({ open: false, message: '', severity: 'success' });
 
   const handleDelete = async () => {
+    setProgress({ done: 0, total: 0 });
     try {
-      const result = await deleteMutation.mutateAsync();
+      const result = await deleteMutation.mutateAsync((done, total) => {
+        setProgress({ done, total });
+      });
       setSnackbar({
         open: true,
         message: `Deleted ${result.installations} installations and ${result.payments} payments.`,
@@ -35,7 +40,9 @@ export function AdminDangerZone() {
       });
       setOpen(false);
       setConfirmValue('');
+      setProgress(null);
     } catch (error) {
+      setProgress(null);
       setSnackbar({
         open: true,
         message: error instanceof Error ? error.message : 'Failed to delete data',
@@ -43,6 +50,11 @@ export function AdminDangerZone() {
       });
     }
   };
+
+  const progressPercent =
+    progress && progress.total > 0
+      ? Math.min(100, Math.round((progress.done / progress.total) * 100))
+      : 0;
 
   return (
     <>
@@ -72,7 +84,14 @@ export function AdminDangerZone() {
         </Button>
       </Alert>
 
-      <Dialog open={open} onClose={() => setOpen(false)} maxWidth="sm" fullWidth>
+      <Dialog
+        open={open}
+        onClose={() => {
+          if (!deleteMutation.isPending) setOpen(false);
+        }}
+        maxWidth="sm"
+        fullWidth
+      >
         <DialogTitle>Delete all application data?</DialogTitle>
         <DialogContent>
           <Typography variant="body2" color="text.secondary" mb={2}>
@@ -85,10 +104,25 @@ export function AdminDangerZone() {
             value={confirmValue}
             onChange={(e) => setConfirmValue(e.target.value)}
             autoFocus
+            disabled={deleteMutation.isPending}
           />
+          {deleteMutation.isPending && (
+            <Alert severity="warning" sx={{ mt: 2 }}>
+              {progress && progress.total > 0
+                ? `Deleted ${progress.done.toLocaleString()} / ${progress.total.toLocaleString()} documents…`
+                : 'Preparing delete…'}
+              <LinearProgress
+                variant={progress && progress.total > 0 ? 'determinate' : 'indeterminate'}
+                value={progressPercent}
+                sx={{ mt: 1 }}
+              />
+            </Alert>
+          )}
         </DialogContent>
         <DialogActions>
-          <Button onClick={() => setOpen(false)}>Cancel</Button>
+          <Button onClick={() => setOpen(false)} disabled={deleteMutation.isPending}>
+            Cancel
+          </Button>
           <Button
             color="error"
             variant="contained"

@@ -16,19 +16,8 @@ import {
 } from '@mui/material';
 import { REGIONS, REGION_NAMES, DEVICE_TYPES, DEVICE_TYPE_LABELS, DEVICE_PRICING } from '@/constants';
 import type { DeviceType, InstallationFormData, InstallationWithCalculations } from '@/types';
-import { formatCurrency, formatDateInput } from '@/utils';
+import { formatAmountInput, formatCurrency, formatDateInput, parseAmountInput } from '@/utils';
 import { emptyFieldHighlightSx, isEmptyFormValue } from '@/utils/formFieldStyles';
-
-function formatAmountFieldValue(value: number, emptyWhenZero: boolean): string | number {
-  if (emptyWhenZero && value === 0) return '';
-  return value;
-}
-
-function parseAmountFieldValue(raw: string): number {
-  if (raw === '') return 0;
-  const parsed = Number(raw);
-  return Number.isFinite(parsed) ? parsed : 0;
-}
 
 const baseSchema = yup.object({
   deviceType: yup.string().oneOf(DEVICE_TYPES).required('Device type is required'),
@@ -420,15 +409,18 @@ export function InstallationForm({
               control={control}
               render={({ field }) => (
                 <TextField
-                  type="number"
                   fullWidth
                   label="Total Amount"
                   required
-                  placeholder="Enter total amount"
+                  placeholder="e.g. 12500 or 12,500"
+                  inputMode="decimal"
                   error={!!errors.totalAmount}
                   helperText={errors.totalAmount?.message}
-                  value={formatAmountFieldValue(field.value, isCreate)}
-                  onChange={(e) => field.onChange(parseAmountFieldValue(e.target.value))}
+                  value={formatAmountInput(field.value, { emptyWhenZero: isCreate })}
+                  onChange={(e) => field.onChange(parseAmountInput(e.target.value))}
+                  onBlur={field.onBlur}
+                  name={field.name}
+                  inputRef={field.ref}
                   sx={highlight('totalAmount', isCreate && field.value === 0 ? '' : field.value)}
                 />
               )}
@@ -451,14 +443,17 @@ export function InstallationForm({
                   control={control}
                   render={({ field }) => (
                     <TextField
-                      type="number"
                       fullWidth
                       label="Amount Paid"
-                      placeholder="0"
+                      placeholder="e.g. 5000 or 5,000"
+                      inputMode="decimal"
                       error={!!errors.paidAmount}
                       helperText={errors.paidAmount?.message}
-                      value={formatAmountFieldValue(field.value ?? 0, true)}
-                      onChange={(e) => field.onChange(parseAmountFieldValue(e.target.value))}
+                      value={formatAmountInput(field.value ?? 0, { emptyWhenZero: true })}
+                      onChange={(e) => field.onChange(parseAmountInput(e.target.value))}
+                      onBlur={field.onBlur}
+                      name={field.name}
+                      inputRef={field.ref}
                     />
                   )}
                 />

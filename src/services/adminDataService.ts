@@ -1,20 +1,21 @@
 import {
   collection,
-  deleteDoc,
+  collectionGroup,
   doc,
   getDocs,
   setDoc,
   Timestamp,
-  writeBatch,
+  type DocumentReference,
 } from 'firebase/firestore';
 import { db } from '@/firebase/config';
+import { commitBatchedDeletes, type BatchProgressCallback } from '@/firebase/batchUtils';
 import { fetchUserById } from './usersService';
 
 const INSTALLATIONS = 'installations';
 const PAYMENTS = 'payments';
 const COUNTERS = 'counters';
 const RECEIPT_COUNTER = 'receiptCounter';
-const BATCH_LIMIT = 450;
+const PAYMENT_READ_CONCURRENCY = 10;
 
 async function assertAdmin(uid: string): Promise<void> {
   const profile = await fetchUserById(uid);
@@ -23,34 +24,53 @@ async function assertAdmin(uid: string): Promise<void> {
   }
 }
 
-export async function deleteAllApplicationData(actorUid: string): Promise<{
+async function collectPaymentRefsFallback(
+  installationIds: string[],
+): Promise<DocumentReference[]> {
+  const refs: DocumentReference[] = [];
+
+  for (let i = 0; i < installationIds.length; i += PAYMENT_READ_CONCURRENCY) {
+    const wave = installationIds.slice(i, i + PAYMENT_READ_CONCURRENCY);
+    const snaps = await Promise.all(
+      wave.map((id) => getDocs(collection(db, INSTALLATIONS, id, PAYMENTS))),
+    );
+    snaps.forEach((snap) => {
+      snap.docs.forEach((paymentDoc) => {
+        refs.push(paymentDoc.ref);
+      });
+    });
+  }
+
+  return refs;
+}
+
+export async function deleteAllApplicationData(
+  actorUid: string,
+  onProgress?: BatchProgressCallback,
+): Promise<{
   installations: number;
   payments: number;
 }> {
   await assertAdmin(actorUid);
 
   const installationsSnap = await getDocs(collection(db, INSTALLATIONS));
-  let paymentCount = 0;
-  let installationCount = 0;
+  const installationRefs = installationsSnap.docs.map((d) => d.ref);
+  const installationCount = installationRefs.length;
 
-  for (const installationDoc of installationsSnap.docs) {
-    const paymentsSnap = await getDocs(
-      collection(db, INSTALLATIONS, installationDoc.id, PAYMENTS),
+  let paymentRefs: DocumentReference[];
+  try {
+    const paymentsSnap = await getDocs(collectionGroup(db, PAYMENTS));
+    paymentRefs = paymentsSnap.docs.map((d) => d.ref);
+  } catch {
+    paymentRefs = await collectPaymentRefsFallback(
+      installationsSnap.docs.map((d) => d.id),
     );
-    paymentCount += paymentsSnap.size;
-
-    const paymentDocs = paymentsSnap.docs;
-    for (let i = 0; i < paymentDocs.length; i += BATCH_LIMIT) {
-      const batch = writeBatch(db);
-      paymentDocs.slice(i, i + BATCH_LIMIT).forEach((paymentDoc) => {
-        batch.delete(paymentDoc.ref);
-      });
-      await batch.commit();
-    }
-
-    await deleteDoc(installationDoc.ref);
-    installationCount += 1;
   }
+
+  const paymentCount = paymentRefs.length;
+  const allRefs = [...paymentRefs, ...installationRefs];
+
+  await commitBatchedDeletes(allRefs, { onProgress });
 
   await setDoc(doc(db, COUNTERS, RECEIPT_COUNTER), {
     updatedAt: Timestamp.now(),

@@ -1,6 +1,7 @@
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
 import { QUERY_KEYS } from '@/constants';
 import { useAuth } from '@/contexts/AuthContext';
+import type { BatchProgressCallback } from '@/firebase/batchUtils';
 import { deleteAllApplicationData } from '@/services/adminDataService';
 import { fetchUserById } from '@/services/usersService';
 
@@ -28,9 +29,9 @@ export function useDeleteAllApplicationData() {
   const { user } = useAuth();
 
   return useMutation({
-    mutationFn: async () => {
+    mutationFn: async (onProgress?: BatchProgressCallback) => {
       if (!user?.uid) throw new Error('You must be logged in.');
-      return deleteAllApplicationData(user.uid);
+      return deleteAllApplicationData(user.uid, onProgress);
     },
     onSuccess: () => {
       queryClient.invalidateQueries({ queryKey: QUERY_KEYS.installations });

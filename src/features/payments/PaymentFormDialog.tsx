@@ -12,7 +12,7 @@ import {
   Alert,
 } from '@mui/material';
 import type { Payment, PaymentFormData } from '@/types';
-import { formatDateInput } from '@/utils';
+import { formatAmountInput, formatDateInput, parseAmountInput } from '@/utils';
 import { useCheckReceiptIdUsedElsewhere } from '@/hooks/useInstallations';
 
 const schema = yup.object({
@@ -134,17 +134,21 @@ export function PaymentFormDialog({
           control={control}
           render={({ field }) => (
             <TextField
-              {...field}
-              type="number"
               fullWidth
               label="Amount"
               margin="normal"
+              placeholder="e.g. 5000 or 5,000"
+              inputMode="decimal"
               error={!!errors.amount}
               helperText={
                 errors.amount?.message ??
                 (maxAmount !== undefined ? `Maximum pending: ${maxAmount}` : undefined)
               }
-              onChange={(e) => field.onChange(Number(e.target.value))}
+              value={formatAmountInput(field.value, { emptyWhenZero: true })}
+              onChange={(e) => field.onChange(parseAmountInput(e.target.value))}
+              onBlur={field.onBlur}
+              name={field.name}
+              inputRef={field.ref}
             />
           )}
         />

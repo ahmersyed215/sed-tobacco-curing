@@ -23,12 +23,35 @@ export function calculateAmounts(totalAmount: number, payments: Payment[]) {
   const amountReceived = payments.reduce((sum, p) => sum + p.amount, 0);
   const amountPending = Math.max(0, totalAmount - amountReceived);
   const paymentStatus = calculatePaymentStatus(amountReceived, totalAmount);
-  const receiptIds = payments.map((p) => p.receiptId);
+  const receiptIds = payments.map((p) => p.receiptId).filter((id) => !!id?.trim());
   const latestReceiptId = payments.length
     ? [...payments].sort((a, b) => b.paymentDate.getTime() - a.paymentDate.getTime())[0].receiptId
     : undefined;
 
   return { amountReceived, amountPending, paymentStatus, receiptIds, latestReceiptId };
+}
+
+/** Merge payment calcs with the installation doc — keep stored receipt when there are no payments. */
+export function withInstallationCalculations(
+  installation: Installation,
+  payments: Payment[],
+): Installation & ReturnType<typeof calculateAmounts> {
+  const calculations = calculateAmounts(installation.totalAmount, payments);
+  const latestReceiptId =
+    calculations.latestReceiptId?.trim() || installation.latestReceiptId?.trim() || undefined;
+  const receiptIds =
+    calculations.receiptIds.length > 0
+      ? calculations.receiptIds
+      : latestReceiptId
+        ? [latestReceiptId]
+        : [];
+
+  return {
+    ...installation,
+    ...calculations,
+    latestReceiptId,
+    receiptIds,
+  };
 }
 
 export function formatCurrency(amount: number): string {
@@ -38,6 +61,70 @@ export function formatCurrency(amount: number): string {
     minimumFractionDigits: 0,
     maximumFractionDigits: 0,
   }).format(amount);
+}
+
+/**
+ * Parse user/Excel amounts: commas, spaces, currency labels (Rs, PKR, $).
+ * Returns null when the value is empty or not a number.
+ */
+export function parseFlexibleNumber(value: unknown): number | null {
+  if (typeof value === 'number') {
+    return Number.isFinite(value) ? value : null;
+  }
+  if (typeof value !== 'string') return null;
+
+  let raw = value.trim();
+  if (!raw) return null;
+
+  raw = raw.replace(/^(rs\.?|pkr|usd|eur|gbp)\s*/i, '');
+  raw = raw.replace(/\s*(rs\.?|pkr|usd|eur|gbp)$/i, '');
+  raw = raw.replace(/[$€£]/g, '');
+  raw = raw.replace(/\s/g, '');
+
+  if (!raw || raw === '-' || raw === '.' || raw === ',') return null;
+
+  const hasComma = raw.includes(',');
+  const hasDot = raw.includes('.');
+
+  if (hasComma && hasDot) {
+    if (raw.lastIndexOf(',') > raw.lastIndexOf('.')) {
+      // 1.234,56
+      raw = raw.replace(/\./g, '').replace(',', '.');
+    } else {
+      // 1,234.56
+      raw = raw.replace(/,/g, '');
+    }
+  } else if (hasComma) {
+    const parts = raw.split(',');
+    if (parts.length === 2 && parts[1].length > 0 && parts[1].length <= 2) {
+      // 12,5 → decimal
+      raw = `${parts[0]}.${parts[1]}`;
+    } else {
+      // 12,500 → thousands
+      raw = raw.replace(/,/g, '');
+    }
+  }
+
+  if (!/^-?\d+(\.\d+)?$/.test(raw)) return null;
+
+  const parsed = Number(raw);
+  return Number.isFinite(parsed) ? parsed : null;
+}
+
+/** Display helper for amount fields — empty string instead of a stuck "0". */
+export function formatAmountInput(
+  value: number | null | undefined,
+  options?: { emptyWhenZero?: boolean },
+): string {
+  if (value === null || value === undefined || Number.isNaN(value)) return '';
+  if ((options?.emptyWhenZero ?? true) && value === 0) return '';
+  return String(value);
+}
+
+/** Parse amount field text into a number (empty → 0). */
+export function parseAmountInput(raw: string): number {
+  if (!raw.trim()) return 0;
+  return parseFlexibleNumber(raw) ?? 0;
 }
 
 export function formatDate(date: Date | undefined | null): string {

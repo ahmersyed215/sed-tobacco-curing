@@ -1,7 +1,9 @@
 export const REGIONS: Record<string, string[]> = {
-  Mardan: ['Shergarh', 'Jamal Garhi', 'Azeemabad'],
-  Swabi: ['Roshanpura', 'Faujoon', 'Yar Hussain'],
-  'Pindi Gheb': [],
+  Mardan: ['Sher Garh', 'Jamal Garhi', 'Mandani', 'Shareefabad'],
+  Swabi: ['Roshanpora', 'Yar Hussain', 'Faujoon', 'Azeemabad'],
+  Mansehra: ['Baffa'],
+  Mianwali: ['Pindigheb'],
+  Buner: ['Buner'],
 };
 
 export const REGION_NAMES = Object.keys(REGIONS) as Array<keyof typeof REGIONS>;
@@ -40,18 +42,28 @@ export const EXCEL_COLUMNS = [
   'Total Amount',
   'Receipt ID',
   'Paid Amount',
+  'Recovered Amount',
   'Followup Date',
 ] as const;
 
 export const EXCEL_IMPORT_NOTES = {
   farmerName: 'Any text (e.g. Shayan Khan)',
   ptcRepresentative: 'Optional — leave blank if not assigned',
-  dates: 'DD/MM/YYYY (e.g. 19/06/2026) or standard Excel date cells',
-  totalAmount: 'Numbers with or without commas (e.g. 80,000)',
+  dates: 'DD/MM/YYYY (e.g. 19/06/2026) or standard Excel/Numbers date cells',
+  totalAmount: 'Numbers with commas/currency OK (e.g. 80,000 or Rs 80000)',
   depo: 'Any text — legacy depo names are accepted on import',
-  receiptId: 'Optional — required when Paid Amount is provided (any text)',
-  paidAmount: 'Optional — also accepts "Amount Received"; remaining = Total − Paid',
+  receiptId:
+    'Required unique key — re-importing the same Receipt ID overwrites that installation; duplicates in the file are rejected',
+  paidAmount:
+    'Optional — also accepts "Amount Received"; commas/currency OK; remaining = Total − Paid − Recovered',
+  recoveredAmount: 'Optional — if filled, imported as a second payment on the same receipt',
+  fileFormats: 'Excel (.xlsx, .xls) and Apple Numbers (.numbers)',
 } as const;
+
+/** File extensions accepted for spreadsheet import. */
+export const IMPORT_FILE_EXTENSIONS = ['.xlsx', '.xls', '.numbers'] as const;
+
+export const IMPORT_FILE_ACCEPT = IMPORT_FILE_EXTENSIONS.join(',');
 
 export const NEAR_FUTURE_FOLLOWUP_DAYS = 7;
 
@@ -61,7 +73,7 @@ export const NAV_ITEMS = [
   { label: 'Payments', path: '/payments', icon: 'Payments' },
   { label: 'Followups', path: '/followups', icon: 'Followups' },
   { label: 'Statistics', path: '/statistics', icon: 'Statistics' },
-  { label: 'Import Excel', path: '/import', icon: 'Import' },
+  { label: 'Import Data', path: '/import', icon: 'Import' },
   { label: 'Users', path: '/users', icon: 'Users' },
 ] as const;
 

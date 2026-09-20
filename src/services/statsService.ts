@@ -51,6 +51,19 @@ export function filterInstallations(
     if (filters.fullyPaidOnly && item.amountPending !== 0) return false;
     if (filters.followupDueOnly && !isFollowupDue(item.followupDate, item.amountPending)) return false;
 
+    if (filters.receiptId?.trim()) {
+      const query = filters.receiptId.trim().toLowerCase();
+      const queryNormalized = query.replace(/[-\s]/g, '');
+      const receiptHaystack = [item.latestReceiptId ?? '', ...item.receiptIds]
+        .join(' ')
+        .toLowerCase();
+      const receiptHaystackNormalized = receiptHaystack.replace(/[-\s]/g, '');
+
+      if (!receiptHaystack.includes(query) && !receiptHaystackNormalized.includes(queryNormalized)) {
+        return false;
+      }
+    }
+
     if (filters.search?.trim()) {
       const query = filters.search.trim().toLowerCase();
       const queryNormalized = query.replace(/[-\s]/g, '');

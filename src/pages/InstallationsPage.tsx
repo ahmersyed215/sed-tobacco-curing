@@ -40,6 +40,7 @@ const defaultFilters: InstallationFilters = {
   fullyPaidOnly: false,
   followupDueOnly: false,
   search: '',
+  receiptId: '',
 };
 
 export function InstallationsPage() {
@@ -93,7 +94,7 @@ export function InstallationsPage() {
       width: 200,
       valueFormatter: (value: string) => formatDeviceTypeLabel(value),
     },
-    { field: 'deviceId', headerName: 'Device ID', width: 110 },
+    { field: 'latestReceiptId', headerName: 'Receipt ID', width: 140 },
     { field: 'farmerName', headerName: 'Farmer Name', width: 150 },
     { field: 'farmerNumber', headerName: 'Farmer Number', width: 130 },
     { field: 'farmerCNIC', headerName: 'CNIC', width: 140 },
@@ -125,7 +126,7 @@ export function InstallationsPage() {
       width: 110,
       valueFormatter: (value: number) => formatCurrency(value),
     },
-    { field: 'latestReceiptId', headerName: 'Latest Receipt', width: 140 },
+    { field: 'deviceId', headerName: 'Device ID', width: 110 },
     {
       field: 'followupDate',
       headerName: 'Followup',
@@ -135,13 +136,18 @@ export function InstallationsPage() {
     {
       field: 'paymentStatus',
       headerName: 'Status',
-      width: 130,
+      width: 140,
+      cellClassName: (params) => {
+        if (params.value === 'PAID') return 'payment-status-paid';
+        if (params.value === 'PARTIALLY_PAID') return 'payment-status-partial';
+        return 'payment-status-unpaid';
+      },
       renderCell: (params) => <PaymentStatusChip status={params.value} />,
     },
     {
       field: 'actions',
       headerName: 'Actions',
-      width: 200,
+      width: 240,
       sortable: false,
       filterable: false,
       renderCell: (params) => (
@@ -159,6 +165,11 @@ export function InstallationsPage() {
           <Tooltip title="Payments">
             <IconButton size="small" onClick={() => navigate(`/payments/${params.row.id}`)}>
               <PaymentsIcon fontSize="small" />
+            </IconButton>
+          </Tooltip>
+          <Tooltip title="Add Payment">
+            <IconButton size="small" onClick={() => navigate(`/payments/${params.row.id}`)}>
+              <AddIcon fontSize="small" />
             </IconButton>
           </Tooltip>
           <Tooltip title="Delete">
@@ -237,7 +248,28 @@ export function InstallationsPage() {
           initialState={{ pagination: { paginationModel: { pageSize: 25 } } }}
           disableRowSelectionOnClick
           density="compact"
-          sx={{ fontFamily: 'inherit', border: 'none' }}
+          sx={{
+            fontFamily: 'inherit',
+            border: 'none',
+            '& .payment-status-unpaid': {
+              bgcolor: '#8B0000',
+            },
+            '& .payment-status-partial': {
+              bgcolor: '#F57C00',
+            },
+            '& .payment-status-paid': {
+              bgcolor: '#2E7D32',
+            },
+            '& .MuiDataGrid-row:hover .payment-status-unpaid': {
+              bgcolor: '#6d0000',
+            },
+            '& .MuiDataGrid-row:hover .payment-status-partial': {
+              bgcolor: '#E65100',
+            },
+            '& .MuiDataGrid-row:hover .payment-status-paid': {
+              bgcolor: '#1B5E20',
+            },
+          }}
         />
       </Box>
 

@@ -1,16 +1,29 @@
 import * as XLSX from 'xlsx';
-import type { ExcelImportRow, ImportValidationError } from '@/types';
-import { REGIONS } from '@/constants';
-import { normalizeDeviceType, parseImportDate } from '@/utils';
-import { importInstallations, checkReceiptIdExists } from './installationService';
+import type { ExcelImportRow, ImportResult, ImportValidationError } from '@/types';
+import { IMPORT_FILE_EXTENSIONS, REGIONS } from '@/constants';
+import { normalizeDeviceType, parseFlexibleNumber, parseImportDate } from '@/utils';
+import { importInstallations, buildReceiptImportIndex } from './installationService';
+
+export type ImportProgressPhase = 'checking' | 'writing';
+
+export type ImportProgressCallback = (
+  phase: ImportProgressPhase,
+  done: number,
+  total: number,
+) => void;
 
 function parseNumber(value: unknown): number | null {
-  if (typeof value === 'number' && !Number.isNaN(value)) return value;
-  if (typeof value === 'string' && value.trim()) {
-    const parsed = Number(value.replace(/,/g, ''));
-    return Number.isNaN(parsed) ? null : parsed;
-  }
-  return null;
+  return parseFlexibleNumber(value);
+}
+
+function getFileExtension(fileName: string): string {
+  const match = fileName.toLowerCase().match(/(\.[a-z0-9]+)$/);
+  return match?.[1] ?? '';
+}
+
+export function isSupportedImportFile(file: File): boolean {
+  const ext = getFileExtension(file.name);
+  return (IMPORT_FILE_EXTENSIONS as readonly string[]).includes(ext);
 }
 
 function getCell(row: Record<string, unknown>, key: string): unknown {
@@ -21,24 +34,51 @@ function getCell(row: Record<string, unknown>, key: string): unknown {
   return match ? row[match] : undefined;
 }
 
-export function parseExcelFile(file: File): Promise<Record<string, unknown>[]> {
-  return new Promise((resolve, reject) => {
-    const reader = new FileReader();
-    reader.onload = (e) => {
-      try {
-        const data = new Uint8Array(e.target?.result as ArrayBuffer);
-        const workbook = XLSX.read(data, { type: 'array', cellDates: true });
-        const sheetName = workbook.SheetNames[0];
-        const sheet = workbook.Sheets[sheetName];
-        const rows = XLSX.utils.sheet_to_json<Record<string, unknown>>(sheet, { defval: '' });
-        resolve(rows);
-      } catch (error) {
-        reject(error);
-      }
-    };
-    reader.onerror = () => reject(new Error('Failed to read file'));
-    reader.readAsArrayBuffer(file);
-  });
+function sheetHasData(sheet: XLSX.WorkSheet): boolean {
+  const rows = XLSX.utils.sheet_to_json<Record<string, unknown>>(sheet, { defval: '' });
+  return rows.length > 0;
+}
+
+/**
+ * Parse Excel (.xlsx/.xls) or Apple Numbers (.numbers) into row objects.
+ * Numbers files may expose one worksheet per table — the first non-empty sheet is used.
+ */
+export async function parseExcelFile(file: File): Promise<Record<string, unknown>[]> {
+  if (!isSupportedImportFile(file)) {
+    throw new Error(
+      `Unsupported file type. Please upload ${IMPORT_FILE_EXTENSIONS.join(', ')}.`,
+    );
+  }
+
+  const data = new Uint8Array(await file.arrayBuffer());
+
+  let workbook: XLSX.WorkBook;
+  try {
+    workbook = XLSX.read(data, { type: 'array', cellDates: true });
+  } catch {
+    const ext = getFileExtension(file.name);
+    if (ext === '.numbers') {
+      throw new Error(
+        'Could not read this Apple Numbers file. Export as Excel (.xlsx) from Numbers, or use a Numbers 3.0+ / iWork 2013+ file.',
+      );
+    }
+    throw new Error('Failed to parse spreadsheet. Please check the file format.');
+  }
+
+  if (!workbook.SheetNames.length) {
+    throw new Error('The spreadsheet contains no sheets.');
+  }
+
+  const sheetName =
+    workbook.SheetNames.find((name) => sheetHasData(workbook.Sheets[name])) ??
+    workbook.SheetNames[0];
+  const sheet = workbook.Sheets[sheetName];
+  if (!sheet) {
+    throw new Error('The spreadsheet contains no readable sheets.');
+  }
+
+  const rows = XLSX.utils.sheet_to_json<Record<string, unknown>>(sheet, { defval: '' });
+  return rows;
 }
 
 function getPaidAmount(row: Record<string, unknown>): number | null {
@@ -47,6 +87,12 @@ function getPaidAmount(row: Record<string, unknown>): number | null {
     parseNumber(getCell(row, 'Amount Received')) ??
     parseNumber(getCell(row, 'Paid amount'))
   );
+}
+
+function isCellEmpty(value: unknown): boolean {
+  if (value === undefined || value === null) return true;
+  if (typeof value === 'string' && !value.trim()) return true;
+  return false;
 }
 
 export function validateImportRows(rows: Record<string, unknown>[]): {
@@ -79,6 +125,11 @@ export function validateImportRows(rows: Record<string, unknown>[]): {
     const followupDate = parseImportDate(getCell(row, 'Followup Date'));
     const receiptId = String(getCell(row, 'Receipt ID') ?? getCell(row, 'Latest Receipt ID') ?? '').trim();
     const paidAmount = getPaidAmount(row);
+    const recoveredRaw = getCell(row, 'Recovered Amount');
+    const recoveredPresent = !isCellEmpty(recoveredRaw);
+    const recoveredAmount = recoveredPresent ? parseNumber(recoveredRaw) : null;
+    const paidForTotals = paidAmount && paidAmount > 0 ? paidAmount : 0;
+    const recoveredForTotals = recoveredAmount && recoveredAmount > 0 ? recoveredAmount : 0;
 
     if (!farmerName) errors.push({ row: rowNum, field: 'Farmer Name', message: 'Required' });
     if (!farmerNumber) errors.push({ row: rowNum, field: 'Farmer Number', message: 'Required' });
@@ -100,6 +151,12 @@ export function validateImportRows(rows: Record<string, unknown>[]): {
     if (paidAmount !== null && paidAmount < 0) {
       errors.push({ row: rowNum, field: 'Paid Amount', message: 'Cannot be negative' });
     }
+    if (recoveredPresent && recoveredAmount === null) {
+      errors.push({ row: rowNum, field: 'Recovered Amount', message: 'Invalid amount' });
+    }
+    if (recoveredAmount !== null && recoveredAmount < 0) {
+      errors.push({ row: rowNum, field: 'Recovered Amount', message: 'Cannot be negative' });
+    }
     if (
       paidAmount !== null &&
       totalAmount !== null &&
@@ -111,14 +168,25 @@ export function validateImportRows(rows: Record<string, unknown>[]): {
         message: 'Paid amount cannot exceed total amount',
       });
     }
-    if ((paidAmount ?? 0) > 0 && !receiptId) {
+    if (
+      recoveredForTotals > 0 &&
+      totalAmount !== null &&
+      paidForTotals + recoveredForTotals > totalAmount
+    ) {
+      errors.push({
+        row: rowNum,
+        field: 'Recovered Amount',
+        message: 'Paid + recovered cannot exceed total amount',
+      });
+    }
+    if (!receiptId) {
       errors.push({
         row: rowNum,
         field: 'Receipt ID',
-        message: 'Required when a paid amount is provided',
+        message: 'Required',
       });
     }
-    if (receiptId && (paidAmount ?? 0) > 0) {
+    if (receiptId) {
       const duplicateRow = receiptIdsInFile.get(receiptId);
       if (duplicateRow) {
         errors.push({
@@ -146,8 +214,9 @@ export function validateImportRows(rows: Record<string, unknown>[]): {
       ptcRepresentative: ptcRepresentative || '',
       installationDate: installationDate!,
       totalAmount: totalAmount!,
-      receiptId: receiptId || undefined,
-      paidAmount: paidAmount && paidAmount > 0 ? paidAmount : undefined,
+      receiptId,
+      paidAmount: paidForTotals > 0 ? paidForTotals : undefined,
+      recoveredAmount: recoveredForTotals > 0 ? recoveredForTotals : undefined,
       followupDate,
     });
   });
@@ -155,22 +224,21 @@ export function validateImportRows(rows: Record<string, unknown>[]): {
   return { validRows, errors };
 }
 
-export async function confirmImport(rows: ExcelImportRow[], userEmail: string): Promise<number> {
+export async function confirmImport(
+  rows: ExcelImportRow[],
+  userEmail: string,
+  onProgress?: ImportProgressCallback,
+): Promise<ImportResult> {
   if (!userEmail.trim()) {
     throw new Error('You must be logged in to import records.');
   }
 
-  const receiptIds = rows
-    .filter((row) => row.receiptId && (row.paidAmount ?? 0) > 0)
-    .map((row) => row.receiptId!.trim());
+  let receiptIndex: Awaited<ReturnType<typeof buildReceiptImportIndex>>;
 
   try {
-    for (const receiptId of receiptIds) {
-      const exists = await checkReceiptIdExists(receiptId);
-      if (exists) {
-        throw new Error(`Receipt ID already exists in the system: ${receiptId}`);
-      }
-    }
+    onProgress?.('checking', 0, rows.length || 1);
+    receiptIndex = await buildReceiptImportIndex();
+    onProgress?.('checking', rows.length || 1, rows.length || 1);
   } catch (error) {
     if (typeof error === 'object' && error !== null && 'code' in error) {
       const code = String((error as { code: string }).code);
@@ -184,7 +252,14 @@ export async function confirmImport(rows: ExcelImportRow[], userEmail: string): 
   }
 
   try {
-    return await importInstallations(rows, userEmail);
+    return await importInstallations(
+      rows,
+      userEmail,
+      (done, total) => {
+        onProgress?.('writing', done, total);
+      },
+      receiptIndex,
+    );
   } catch (error) {
     if (typeof error === 'object' && error !== null && 'code' in error) {
       const code = String((error as { code: string }).code);

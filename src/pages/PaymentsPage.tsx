@@ -1,15 +1,16 @@
 import { useMemo, useState } from 'react';
 import { useNavigate, useParams } from 'react-router-dom';
 import {
+  Autocomplete,
   Box,
   Button,
   Typography,
   Paper,
   Grid,
   TextField,
-  MenuItem,
   IconButton,
   Tooltip,
+  Stack,
 } from '@mui/material';
 import { DataGrid, type GridColDef } from '@mui/x-data-grid';
 import AddIcon from '@mui/icons-material/Add';
@@ -30,7 +31,42 @@ import { PaymentFormDialog } from '@/features/payments/PaymentFormDialog';
 import { AppSnackbar } from '@/components/common/AppSnackbar';
 import { exportToCsv, exportToExcel, mapPaymentsForExport } from '@/services/exportService';
 import { formatCurrency, formatDate } from '@/utils';
-import type { Payment, PaymentFormData } from '@/types';
+import type { InstallationWithCalculations, Payment, PaymentFormData } from '@/types';
+
+function getInstallationReceiptId(installation: InstallationWithCalculations): string {
+  return (
+    installation.latestReceiptId?.trim() ||
+    installation.receiptIds.find((id) => id.trim())?.trim() ||
+    ''
+  );
+}
+
+function formatInstallationOption(installation: InstallationWithCalculations): string {
+  const receiptId = getInstallationReceiptId(installation) || '—';
+  return `${receiptId} - ${installation.farmerName} — ${installation.region} (${formatCurrency(installation.amountPending)} pending)`;
+}
+
+function filterInstallationOptions(
+  options: InstallationWithCalculations[],
+  inputValue: string,
+): InstallationWithCalculations[] {
+  const query = inputValue.trim().toLowerCase();
+  if (!query) return options;
+
+  const queryNormalized = query.replace(/[-\s]/g, '');
+  return options.filter((installation) => {
+    const haystack = [
+      installation.latestReceiptId ?? '',
+      ...installation.receiptIds,
+      installation.farmerName,
+      installation.region,
+    ]
+      .join(' ')
+      .toLowerCase();
+    const haystackNormalized = haystack.replace(/[-\s]/g, '');
+    return haystack.includes(query) || haystackNormalized.includes(queryNormalized);
+  });
+}
 
 export function PaymentsPage() {
   const { installationId } = useParams();
@@ -197,85 +233,92 @@ export function PaymentsPage() {
         Payment Ledger
       </Typography>
 
-      {!installationId && (
-        <Paper sx={{ p: 2, mb: 2 }}>
-          <TextField
-            select
-            fullWidth
-            label="Select Installation"
-            value={selectedId}
-            onChange={(e) => {
-              setSelectedId(e.target.value);
-              navigate(`/payments/${e.target.value}`);
-            }}
-            size="small"
-          >
-            {installations.map((inst) => (
-              <MenuItem key={inst.id} value={inst.id}>
-                {inst.farmerName} — {inst.region} ({formatCurrency(inst.amountPending)} pending)
-              </MenuItem>
-            ))}
-          </TextField>
-        </Paper>
-      )}
+      <Paper sx={{ p: 2, mb: 2 }}>
+        <Autocomplete
+          options={installations}
+          value={installations.find((installation) => installation.id === (installationId ?? selectedId)) ?? null}
+          getOptionLabel={formatInstallationOption}
+          isOptionEqualToValue={(option, value) => option.id === value.id}
+          filterOptions={(options, state) => filterInstallationOptions(options, state.inputValue)}
+          onChange={(_, installation) => {
+            if (!installation) {
+              setSelectedId('');
+              navigate('/payments');
+              return;
+            }
+            setSelectedId(installation.id);
+            navigate(`/payments/${installation.id}`);
+          }}
+          renderInput={(params) => (
+            <TextField
+              {...params}
+              label="Select Installation"
+              placeholder="Search receipt ID, farmer name, or region"
+              size="small"
+            />
+          )}
+        />
+      </Paper>
 
       {activeInstallation && (
         <>
           <Paper sx={{ p: 2, mb: 2 }}>
             <Grid container spacing={2}>
-              <Grid item xs={12} md={4}>
+              <Grid item xs={12} sm={6} md={4}>
                 <Typography variant="caption" color="text.secondary">Farmer</Typography>
                 <Typography fontWeight={600}>{activeInstallation.farmerName}</Typography>
               </Grid>
-              <Grid item xs={12} md={2}>
+              <Grid item xs={12} sm={6} md={2}>
                 <Typography variant="caption" color="text.secondary">Total Amount</Typography>
                 <Typography fontWeight={600}>{formatCurrency(activeInstallation.totalAmount)}</Typography>
               </Grid>
-              <Grid item xs={12} md={2}>
+              <Grid item xs={12} sm={6} md={2}>
                 <Typography variant="caption" color="text.secondary">Received</Typography>
                 <Typography fontWeight={600} color="success.main">
                   {formatCurrency(activeInstallation.amountReceived)}
                 </Typography>
               </Grid>
-              <Grid item xs={12} md={2}>
+              <Grid item xs={12} sm={6} md={2}>
                 <Typography variant="caption" color="text.secondary">Receipt ID</Typography>
                 <Typography fontWeight={600}>{installationReceiptId || '—'}</Typography>
               </Grid>
-              <Grid item xs={12} md={2}>
+              <Grid item xs={12} sm={6} md={2}>
                 <Typography variant="caption" color="text.secondary">Pending</Typography>
                 <Typography fontWeight={600} color="warning.main">
                   {formatCurrency(activeInstallation.amountPending)}
                 </Typography>
               </Grid>
-              <Grid item xs={12} md={2} display="flex" alignItems="center" justifyContent="flex-end" gap={1}>
-                <Button
-                  startIcon={<FileDownloadIcon />}
-                  variant="outlined"
-                  size="small"
-                  onClick={() => handleExport('excel')}
-                >
-                  Excel
-                </Button>
-                <Button
-                  startIcon={<FileDownloadIcon />}
-                  variant="outlined"
-                  size="small"
-                  onClick={() => handleExport('csv')}
-                >
-                  CSV
-                </Button>
-                <Button
-                  startIcon={<AddIcon />}
-                  variant="contained"
-                  size="small"
-                  onClick={() => {
-                    setEditingPayment(undefined);
-                    setDialogOpen(true);
-                  }}
-                  disabled={activeInstallation.amountPending <= 0}
-                >
-                  Add Payment
-                </Button>
+              <Grid item xs={12}>
+                <Stack direction="row" spacing={1} flexWrap="wrap" useFlexGap justifyContent="flex-end">
+                  <Button
+                    startIcon={<FileDownloadIcon />}
+                    variant="outlined"
+                    size="small"
+                    onClick={() => handleExport('excel')}
+                  >
+                    Excel
+                  </Button>
+                  <Button
+                    startIcon={<FileDownloadIcon />}
+                    variant="outlined"
+                    size="small"
+                    onClick={() => handleExport('csv')}
+                  >
+                    CSV
+                  </Button>
+                  <Button
+                    startIcon={<AddIcon />}
+                    variant="contained"
+                    size="small"
+                    onClick={() => {
+                      setEditingPayment(undefined);
+                      setDialogOpen(true);
+                    }}
+                    disabled={activeInstallation.amountPending <= 0}
+                  >
+                    Add Payment
+                  </Button>
+                </Stack>
               </Grid>
             </Grid>
           </Paper>

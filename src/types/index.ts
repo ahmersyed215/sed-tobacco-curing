@@ -79,6 +79,7 @@ export interface InstallationFilters {
   fullyPaidOnly?: boolean;
   followupDueOnly?: boolean;
   search?: string;
+  receiptId?: string;
 }
 
 export interface DashboardStats {
@@ -137,8 +138,9 @@ export interface ExcelImportRow {
   ptcRepresentative: string;
   installationDate: Date;
   totalAmount: number;
-  receiptId?: string;
+  receiptId: string;
   paidAmount?: number;
+  recoveredAmount?: number;
   followupDate?: Date;
 }
 
@@ -146,6 +148,12 @@ export interface ImportValidationError {
   row: number;
   field: string;
   message: string;
+}
+
+export interface ImportResult {
+  created: number;
+  updated: number;
+  total: number;
 }
 
 export interface DailyInstallationSummary {

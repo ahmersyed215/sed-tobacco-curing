@@ -15,14 +15,16 @@ import {
 } from '@mui/material';
 import UploadFileIcon from '@mui/icons-material/UploadFile';
 import { useQueryClient } from '@tanstack/react-query';
-import { EXCEL_COLUMNS, EXCEL_IMPORT_NOTES, QUERY_KEYS } from '@/constants';
+import { EXCEL_COLUMNS, EXCEL_IMPORT_NOTES, IMPORT_FILE_ACCEPT, QUERY_KEYS } from '@/constants';
 import {
   parseExcelFile,
   validateImportRows,
   confirmImport,
+  type ImportProgressPhase,
 } from '@/services/exportService';
+import { buildReceiptImportIndex } from '@/services/installationService';
 import { useAuth } from '@/contexts/AuthContext';
-import type { ExcelImportRow, ImportValidationError } from '@/types';
+import type { ExcelImportRow, ImportResult, ImportValidationError } from '@/types';
 
 type Step = 'upload' | 'preview' | 'importing' | 'done';
 
@@ -33,14 +35,23 @@ export function ImportPage() {
   const [step, setStep] = useState<Step>('upload');
   const [validRows, setValidRows] = useState<ExcelImportRow[]>([]);
   const [errors, setErrors] = useState<ImportValidationError[]>([]);
-  const [importedCount, setImportedCount] = useState(0);
+  const [importResult, setImportResult] = useState<ImportResult | null>(null);
+  const [previewCounts, setPreviewCounts] = useState<{ create: number; update: number } | null>(
+    null,
+  );
   const [fileError, setFileError] = useState('');
+  const [progress, setProgress] = useState<{
+    phase: ImportProgressPhase;
+    done: number;
+    total: number;
+  } | null>(null);
 
   const handleFileChange = async (e: React.ChangeEvent<HTMLInputElement>) => {
     const file = e.target.files?.[0];
     if (!file) return;
 
     setFileError('');
+    setPreviewCounts(null);
     try {
       const rows = await parseExcelFile(file);
       if (rows.length === 0) {
@@ -52,8 +63,27 @@ export function ImportPage() {
       setValidRows(valid);
       setErrors(validationErrors);
       setStep('preview');
-    } catch {
-      setFileError('Failed to parse Excel file. Please check the format.');
+
+      if (valid.length > 0) {
+        try {
+          const receiptIndex = await buildReceiptImportIndex();
+          let create = 0;
+          let update = 0;
+          valid.forEach((row) => {
+            if (receiptIndex.has(row.receiptId.trim())) update += 1;
+            else create += 1;
+          });
+          setPreviewCounts({ create, update });
+        } catch {
+          setPreviewCounts(null);
+        }
+      }
+    } catch (error) {
+      setFileError(
+        error instanceof Error
+          ? error.message
+          : 'Failed to parse spreadsheet. Please check the format.',
+      );
     }
 
     e.target.value = '';
@@ -68,15 +98,20 @@ export function ImportPage() {
     }
 
     setFileError('');
+    setProgress({ phase: 'checking', done: 0, total: 1 });
     setStep('importing');
 
     try {
-      const count = await confirmImport(validRows, user.email);
-      setImportedCount(count);
+      const result = await confirmImport(validRows, user.email, (phase, done, total) => {
+        setProgress({ phase, done, total });
+      });
+      setImportResult(result);
       await queryClient.invalidateQueries({ queryKey: QUERY_KEYS.installations });
       await queryClient.invalidateQueries({ queryKey: QUERY_KEYS.allPayments });
+      setProgress(null);
       setStep('done');
     } catch (error) {
+      setProgress(null);
       setFileError(
         error instanceof Error ? error.message : 'Import failed. Please try again.',
       );
@@ -88,14 +123,28 @@ export function ImportPage() {
     setStep('upload');
     setValidRows([]);
     setErrors([]);
-    setImportedCount(0);
+    setImportResult(null);
+    setPreviewCounts(null);
     setFileError('');
+    setProgress(null);
   };
+
+  const progressPercent =
+    progress && progress.total > 0
+      ? Math.min(100, Math.round((progress.done / progress.total) * 100))
+      : 0;
+
+  const progressLabel =
+    progress?.phase === 'checking'
+      ? 'Matching receipt IDs…'
+      : progress && progress.total > 0
+        ? `Imported ${progress.done.toLocaleString()} / ${progress.total.toLocaleString()} records…`
+        : 'Importing records to Firestore…';
 
   return (
     <Box>
       <Typography variant="h5" fontWeight={700} mb={2}>
-        Import Excel
+        Import Data
       </Typography>
 
       <Paper sx={{ p: 3, mb: 2 }}>
@@ -104,6 +153,9 @@ export function ImportPage() {
         </Typography>
         <Typography variant="body2" color="text.secondary" mb={1}>
           {EXCEL_COLUMNS.join(' · ')}
+        </Typography>
+        <Typography variant="body2" color="text.secondary" mb={0.5}>
+          Supported files: {EXCEL_IMPORT_NOTES.fileFormats}
         </Typography>
         <Typography variant="body2" color="text.secondary" mb={0.5}>
           Farmer Name: {EXCEL_IMPORT_NOTES.farmerName}
@@ -117,8 +169,12 @@ export function ImportPage() {
         <Typography variant="body2" color="text.secondary" mb={0.5}>
           Total Amount: {EXCEL_IMPORT_NOTES.totalAmount} · Depo: {EXCEL_IMPORT_NOTES.depo}
         </Typography>
+        <Typography variant="body2" color="text.secondary" mb={0.5}>
+          Receipt ID: {EXCEL_IMPORT_NOTES.receiptId}
+        </Typography>
         <Typography variant="body2" color="text.secondary" mb={2}>
-          Receipt ID: {EXCEL_IMPORT_NOTES.receiptId} · Paid Amount: {EXCEL_IMPORT_NOTES.paidAmount}
+          Paid Amount: {EXCEL_IMPORT_NOTES.paidAmount} · Recovered Amount:{' '}
+          {EXCEL_IMPORT_NOTES.recoveredAmount}
         </Typography>
         <Typography variant="caption" color="text.secondary" display="block" mb={2}>
           If import fails with permission errors, deploy Firestore rules: firebase deploy --only firestore
@@ -133,8 +189,13 @@ export function ImportPage() {
         {step === 'upload' && (
           <>
             <Button variant="contained" component="label" startIcon={<UploadFileIcon />}>
-              Upload XLSX / XLS
-              <input type="file" hidden accept=".xlsx,.xls" onChange={handleFileChange} />
+              Upload XLSX / XLS / Numbers
+              <input
+                type="file"
+                hidden
+                accept={IMPORT_FILE_ACCEPT}
+                onChange={handleFileChange}
+              />
             </Button>
             {fileError && (
               <Alert severity="error" sx={{ mt: 2 }}>
@@ -149,7 +210,17 @@ export function ImportPage() {
             <Alert severity={errors.length ? 'warning' : 'success'} sx={{ mb: 2 }}>
               {validRows.length} valid records found
               {errors.length > 0 && ` · ${errors.length} validation errors`}
+              {previewCounts &&
+                ` · ${previewCounts.create} new · ${previewCounts.update} will overwrite`}
             </Alert>
+
+            {validRows.length > 0 && (
+              <Alert severity="info" sx={{ mb: 2 }}>
+                Receipt ID is the unique key. Re-importing an existing Receipt ID overwrites that
+                installation and its payments for that receipt. Duplicate Receipt IDs in the file are
+                rejected.
+              </Alert>
+            )}
 
             {errors.length > 0 && (
               <Table size="small" sx={{ mb: 2 }}>
@@ -185,6 +256,7 @@ export function ImportPage() {
                       <TableCell>Device</TableCell>
                       <TableCell>Total</TableCell>
                       <TableCell>Paid</TableCell>
+                      <TableCell>Recovered</TableCell>
                       <TableCell>Remaining</TableCell>
                       <TableCell>Receipt ID</TableCell>
                     </TableRow>
@@ -197,7 +269,10 @@ export function ImportPage() {
                         <TableCell>{row.deviceType}</TableCell>
                         <TableCell>{row.totalAmount}</TableCell>
                         <TableCell>{row.paidAmount ?? 0}</TableCell>
-                        <TableCell>{row.totalAmount - (row.paidAmount ?? 0)}</TableCell>
+                        <TableCell>{row.recoveredAmount ?? 0}</TableCell>
+                        <TableCell>
+                          {row.totalAmount - (row.paidAmount ?? 0) - (row.recoveredAmount ?? 0)}
+                        </TableCell>
                         <TableCell>{row.receiptId ?? '—'}</TableCell>
                       </TableRow>
                     ))}
@@ -219,14 +294,27 @@ export function ImportPage() {
 
         {step === 'importing' && (
           <Box>
-            <Typography mb={2}>Importing records to Firestore...</Typography>
-            <LinearProgress />
+            <Typography mb={2}>{progressLabel}</Typography>
+            <LinearProgress
+              variant={
+                progress?.phase === 'writing' && progress.total > 0
+                  ? 'determinate'
+                  : 'indeterminate'
+              }
+              value={progressPercent}
+            />
+            {progress?.phase === 'writing' && progress.total > 0 && (
+              <Typography variant="caption" color="text.secondary" mt={1} display="block">
+                {progressPercent}%
+              </Typography>
+            )}
           </Box>
         )}
 
-        {step === 'done' && (
+        {step === 'done' && importResult && (
           <Alert severity="success" sx={{ mb: 2 }}>
-            Successfully imported {importedCount} installation records. Open Installations to view them.
+            Imported {importResult.total} records ({importResult.created} created,{' '}
+            {importResult.updated} overwritten). Open Installations to view them.
           </Alert>
         )}
 
