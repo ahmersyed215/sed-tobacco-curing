@@ -1,26 +1,48 @@
+import { useEffect } from 'react';
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
-import { QUERY_KEYS } from '@/constants';
+import { hasPermission } from '@/auth/access';
+import { NAV_ITEMS, QUERY_KEYS } from '@/constants';
 import { useAuth } from '@/contexts/AuthContext';
 import type { BatchProgressCallback } from '@/firebase/batchUtils';
 import { deleteAllApplicationData } from '@/services/adminDataService';
-import { fetchUserById } from '@/services/usersService';
+import { fetchUserById, subscribeToUser } from '@/services/usersService';
+import type { Permission } from '@/types';
 
 export function useCurrentUserProfile() {
-  const { user } = useAuth();
+  const { user, loading } = useAuth();
+  const queryClient = useQueryClient();
 
-  return useQuery({
+  const query = useQuery({
     queryKey: QUERY_KEYS.user(user?.uid ?? ''),
     queryFn: () => fetchUserById(user!.uid),
-    enabled: !!user?.uid,
+    enabled: !!user?.uid && !loading,
   });
+
+  useEffect(() => {
+    if (!user?.uid || loading) return;
+    return subscribeToUser(user.uid, (profile) => {
+      queryClient.setQueryData(QUERY_KEYS.user(user.uid), profile);
+    });
+  }, [user?.uid, loading, queryClient]);
+
+  return query;
 }
 
-export function useIsAdmin() {
-  const { data: profile, isLoading } = useCurrentUserProfile();
+export function useAccess() {
+  const { user, loading: authLoading } = useAuth();
+  const profileQuery = useCurrentUserProfile();
+  const profile = profileQuery.data ?? null;
+
+  const can = (permission: Permission) => hasPermission(profile, permission);
+  const allowedPath = NAV_ITEMS.find((item) => can(item.permission))?.path ?? null;
+
   return {
-    isAdmin: profile?.role === 'admin',
-    isLoading,
+    ...profileQuery,
     profile,
+    isSuperAdmin: profile?.role === 'super_admin',
+    can,
+    allowedPath,
+    isLoading: authLoading || (!!user && profileQuery.isPending),
   };
 }
 

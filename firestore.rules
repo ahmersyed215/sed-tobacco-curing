@@ -2,9 +2,300 @@ rules_version = '2';
 
 service cloud.firestore {
   match /databases/{database}/documents {
-    // Internal admin app: any signed-in user can read/write all data.
-    match /{document=**} {
-      allow read, write: if request.auth != null;
+    function signedIn() {
+      return request.auth != null;
+    }
+
+    function userPath() {
+      return /databases/$(database)/documents/users/$(request.auth.uid);
+    }
+
+    function userData() {
+      return get(userPath()).data;
+    }
+
+    function isActiveUser() {
+      return signedIn()
+        && exists(userPath())
+        && userData().get('isDeleted', false) != true;
+    }
+
+    function isSuperAdmin() {
+      return isActiveUser()
+        && (userData().role == 'super_admin' || userData().role == 'admin');
+    }
+
+    // Legacy "user" accounts keep installation work until their first login rewrites the profile.
+    function hasPermission(permission) {
+      return isSuperAdmin()
+        || (
+          isActiveUser()
+          && userData().get('permissions', {}).get(permission, false) == true
+        )
+        || (
+          isActiveUser()
+          && userData().role == 'user'
+          && (
+            permission == 'installations'
+            || permission == 'payments'
+            || permission == 'followups'
+          )
+        );
+    }
+
+    function canReadOperations() {
+      return hasPermission('dashboard')
+        || hasPermission('installations')
+        || hasPermission('payments')
+        || hasPermission('followups')
+        || hasPermission('statistics')
+        || hasPermission('import');
+    }
+
+    function canWriteOperations() {
+      return hasPermission('installations')
+        || hasPermission('payments')
+        || hasPermission('followups')
+        || hasPermission('import');
+    }
+
+    function requestedPermission(permission) {
+      return request.resource.data.get('permissions', {}).get(permission, false) == true;
+    }
+
+    function hadPermission(permission) {
+      return resource.data.get('permissions', {}).get(permission, false) == true;
+    }
+
+    function canGrantUpdate(permission) {
+      return !requestedPermission(permission)
+        || hasPermission(permission)
+        || hadPermission(permission);
+    }
+
+    function canGrantCreate(permission) {
+      return !requestedPermission(permission) || hasPermission(permission);
+    }
+
+    function grantsStayWithinActor() {
+      return canGrantUpdate('dashboard')
+        && canGrantUpdate('installations')
+        && canGrantUpdate('payments')
+        && canGrantUpdate('followups')
+        && canGrantUpdate('statistics')
+        && canGrantUpdate('expenses')
+        && canGrantUpdate('inventory')
+        && canGrantUpdate('import')
+        && canGrantUpdate('users');
+    }
+
+    function grantsStayWithinActorOnCreate() {
+      return canGrantCreate('dashboard')
+        && canGrantCreate('installations')
+        && canGrantCreate('payments')
+        && canGrantCreate('followups')
+        && canGrantCreate('statistics')
+        && canGrantCreate('expenses')
+        && canGrantCreate('inventory')
+        && canGrantCreate('import')
+        && canGrantCreate('users');
+    }
+
+    function privilegesUnchanged() {
+      return request.resource.data.role == resource.data.role
+        && request.resource.data.get('permissions', {}) == resource.data.get('permissions', {})
+        && request.resource.data.get('isDeleted', false) == resource.data.get('isDeleted', false);
+    }
+
+    function legacyAdminUpgrade(userId) {
+      return request.auth.uid == userId
+        && resource.data.role == 'admin'
+        && request.resource.data.role == 'super_admin'
+        && request.resource.data.get('isDeleted', false) == false;
+    }
+
+    function legacyUserUpgrade(userId) {
+      return request.auth.uid == userId
+        && resource.data.role == 'user'
+        && request.resource.data.role == 'field_staff'
+        && request.resource.data.get('isDeleted', false) == false
+        && requestedPermission('installations')
+        && requestedPermission('payments')
+        && requestedPermission('followups')
+        && !requestedPermission('dashboard')
+        && !requestedPermission('statistics')
+        && !requestedPermission('expenses')
+        && !requestedPermission('inventory')
+        && !requestedPermission('import')
+        && !requestedPermission('users');
+    }
+
+    function managerCanUpdateUser() {
+      return hasPermission('users')
+        && resource.data.role != 'super_admin'
+        && resource.data.role != 'admin'
+        && request.resource.data.role != 'super_admin'
+        && request.resource.data.role != 'admin'
+        && (
+          request.resource.data.role == resource.data.role
+          || request.resource.data.role in ['manager', 'field_staff']
+        )
+        && grantsStayWithinActor();
+    }
+
+    function selfBootstrap(userId) {
+      return request.auth.uid == userId
+        && request.resource.data.uid == request.auth.uid
+        && request.resource.data.get('isDeleted', false) == false
+        && (
+          (
+            !exists(/databases/$(database)/documents/meta/initialized)
+            && request.resource.data.role == 'super_admin'
+          )
+          || (
+            exists(/databases/$(database)/documents/meta/initialized)
+            && request.resource.data.role == 'field_staff'
+            && requestedPermission('installations')
+            && requestedPermission('payments')
+            && requestedPermission('followups')
+            && !requestedPermission('dashboard')
+            && !requestedPermission('statistics')
+            && !requestedPermission('expenses')
+            && !requestedPermission('inventory')
+            && !requestedPermission('import')
+            && !requestedPermission('users')
+          )
+        );
+    }
+
+    match /users/{userId} {
+      allow read: if request.auth.uid == userId
+        || hasPermission('users')
+        || (
+          hasPermission('expenses')
+          && resource.data.get('isDeleted', false) != true
+        );
+
+      allow create: if isSuperAdmin()
+        || (
+          hasPermission('users')
+          && request.resource.data.role in ['manager', 'field_staff']
+          && grantsStayWithinActorOnCreate()
+        )
+        || selfBootstrap(userId);
+
+      allow update: if isSuperAdmin()
+        || (request.auth.uid == userId && privilegesUnchanged())
+        || legacyAdminUpgrade(userId)
+        || legacyUserUpgrade(userId)
+        || managerCanUpdateUser();
+
+      allow delete: if false;
+    }
+
+    match /meta/{docId} {
+      allow read: if signedIn();
+      allow create: if docId == 'initialized'
+        && (
+          isSuperAdmin()
+          || (signedIn() && !exists(/databases/$(database)/documents/meta/initialized))
+        );
+      allow update: if docId == 'initialized' && isSuperAdmin();
+      allow delete: if false;
+    }
+
+    match /installations/{installationId} {
+      allow read: if canReadOperations();
+      allow create, update, delete: if canWriteOperations();
+
+      match /payments/{paymentId} {
+        allow read: if canReadOperations();
+        allow create, update, delete: if canWriteOperations();
+      }
+    }
+
+    match /counters/{docId} {
+      allow read, write: if canWriteOperations();
+    }
+
+    match /expenses/{expenseId} {
+      allow read: if hasPermission('expenses')
+        && (
+          isSuperAdmin()
+          || resource.data.createdByUid == request.auth.uid
+          || (
+            userData().role == 'manager'
+            && resource.data.walletManagerUid == request.auth.uid
+          )
+        );
+
+      allow create: if hasPermission('expenses')
+        && request.resource.data.createdByUid == request.auth.uid
+        && request.resource.data.walletManagerUid is string
+        && request.resource.data.walletManagerUid.size() > 0;
+
+      allow update: if hasPermission('expenses')
+        && request.resource.data.createdByUid == resource.data.createdByUid
+        && request.resource.data.walletManagerUid == resource.data.walletManagerUid
+        && (
+          isSuperAdmin()
+          || resource.data.createdByUid == request.auth.uid
+          || (
+            userData().role == 'manager'
+            && resource.data.walletManagerUid == request.auth.uid
+          )
+        );
+
+      allow delete: if hasPermission('expenses')
+        && (
+          isSuperAdmin()
+          || resource.data.createdByUid == request.auth.uid
+          || (
+            userData().role == 'manager'
+            && resource.data.walletManagerUid == request.auth.uid
+          )
+        );
+    }
+
+    match /expenseInflows/{inflowId} {
+      allow read: if isSuperAdmin()
+        || (
+          isActiveUser()
+          && userData().role == 'manager'
+          && resource.data.walletManagerUid == request.auth.uid
+        );
+
+      allow create: if (
+          isSuperAdmin()
+          || (
+            isActiveUser()
+            && userData().role == 'manager'
+            && request.resource.data.walletManagerUid == request.auth.uid
+          )
+        )
+        && request.resource.data.createdByUid == request.auth.uid
+        && request.resource.data.walletManagerUid is string
+        && request.resource.data.walletManagerUid.size() > 0;
+
+      allow update: if isSuperAdmin()
+        || (
+          isActiveUser()
+          && userData().role == 'manager'
+          && resource.data.walletManagerUid == request.auth.uid
+          && request.resource.data.walletManagerUid == request.auth.uid
+          && request.resource.data.createdByUid == resource.data.createdByUid
+        );
+
+      allow delete: if isSuperAdmin()
+        || (
+          isActiveUser()
+          && userData().role == 'manager'
+          && resource.data.walletManagerUid == request.auth.uid
+        );
+    }
+
+    match /inventory/{itemId} {
+      allow read, write: if hasPermission('inventory');
     }
   }
 }

@@ -23,13 +23,20 @@ export function AuthProvider({ children }: { children: ReactNode }) {
 
   useEffect(() => {
     const unsubscribe = onAuthStateChanged(auth, (currentUser) => {
-      setUser(currentUser);
-      setLoading(false);
-      if (currentUser) {
-        ensureUserProfile(currentUser).catch(() => {
-          // Profile sync is best-effort on login.
-        });
+      if (!currentUser) {
+        setUser(null);
+        setLoading(false);
+        return;
       }
+
+      ensureUserProfile(currentUser)
+        .catch(() => {
+          // Profile sync is best-effort on login. Screens handle a missing profile.
+        })
+        .finally(() => {
+          setUser(currentUser);
+          setLoading(false);
+        });
     });
     return unsubscribe;
   }, []);

@@ -19,8 +19,8 @@ const PAYMENT_READ_CONCURRENCY = 10;
 
 async function assertAdmin(uid: string): Promise<void> {
   const profile = await fetchUserById(uid);
-  if (!profile || profile.role !== 'admin') {
-    throw new Error('Only administrators can perform this action.');
+  if (!profile || profile.role !== 'super_admin') {
+    throw new Error('Only a super admin can perform this action.');
   }
 }
 

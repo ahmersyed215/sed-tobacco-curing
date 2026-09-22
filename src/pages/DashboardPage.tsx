@@ -20,7 +20,7 @@ import PrecisionManufacturingIcon from '@mui/icons-material/PrecisionManufacturi
 import TodayIcon from '@mui/icons-material/Today';
 import HistoryIcon from '@mui/icons-material/History';
 import { useInstallations, useAllPayments } from '@/hooks/useInstallations';
-import { useIsAdmin } from '@/hooks/useAdmin';
+import { useAccess } from '@/hooks/useAdmin';
 import { LoadingScreen } from '@/components/common/LoadingScreen';
 import { StatCard } from '@/components/common/StatCard';
 import { addCalendarDays, formatCurrency } from '@/utils';
@@ -204,7 +204,7 @@ function DeviceMixCard({
 
 export function DashboardPage() {
   const theme = useTheme();
-  const { isAdmin } = useIsAdmin();
+  const { isSuperAdmin } = useAccess();
   const { data: installations = [], isLoading: loadingInstallations } = useInstallations();
   const { data: payments = [], isLoading: loadingPayments } = useAllPayments();
 
@@ -482,7 +482,7 @@ export function DashboardPage() {
       </Box>
       <DashboardCharts installations={installations} payments={payments} />
 
-      {isAdmin && <AdminDangerZone />}
+      {isSuperAdmin && <AdminDangerZone />}
     </Box>
   );
 }

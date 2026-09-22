@@ -21,8 +21,9 @@ import {
   useDeleteUser,
   useRestoreUser,
 } from '@/hooks/useUsers';
+import { accessSummary, PERMISSION_KEYS, ROLE_LABELS } from '@/auth/access';
 import { useAuth } from '@/contexts/AuthContext';
-import { useIsAdmin } from '@/hooks/useAdmin';
+import { useAccess } from '@/hooks/useAdmin';
 import { LoadingScreen } from '@/components/common/LoadingScreen';
 import { AppSnackbar } from '@/components/common/AppSnackbar';
 import { UserFormDialog } from '@/features/users/UserFormDialog';
@@ -31,7 +32,10 @@ import type { AppUser, UserFormData } from '@/types';
 
 export function UsersPage() {
   const { user } = useAuth();
-  const { isAdmin } = useIsAdmin();
+  const { isSuperAdmin, profile } = useAccess();
+  const assignablePermissions = PERMISSION_KEYS.filter(
+    (key) => isSuperAdmin || profile?.permissions[key] === true,
+  );
   const [showDeleted, setShowDeleted] = useState(false);
   const { data: users = [], isLoading } = useUsers(showDeleted);
   const createMutation = useCreateUser();
@@ -53,7 +57,7 @@ export function UsersPage() {
     if (!actorEmail) return;
     try {
       await createMutation.mutateAsync({
-        data: { ...data, role: isAdmin ? data.role ?? 'user' : 'user' },
+        data,
         actorEmail,
       });
       setDialogOpen(false);
@@ -77,7 +81,9 @@ export function UsersPage() {
           name: data.name,
           phone: data.phone,
           notes: data.notes,
-          ...(isAdmin ? { role: data.role ?? 'user' } : {}),
+          role: data.role,
+          permissions: data.permissions,
+          noLogin: data.noLogin,
         },
         actorEmail,
       });
@@ -126,22 +132,58 @@ export function UsersPage() {
   const columns: GridColDef[] = useMemo(
     () => [
       { field: 'name', headerName: 'Name', flex: 1, minWidth: 150 },
-      { field: 'email', headerName: 'Email', flex: 1, minWidth: 180 },
+      {
+        field: 'email',
+        headerName: 'Email',
+        flex: 1,
+        minWidth: 180,
+        valueGetter: (_, row: AppUser) => (row.hasLogin ? row.email : '—'),
+      },
       { field: 'phone', headerName: 'Phone', width: 130 },
       {
-        field: 'role',
-        headerName: 'Role',
+        field: 'login',
+        headerName: 'Login',
         width: 120,
+        valueGetter: (_, row: AppUser) => (row.hasLogin ? 'Login' : 'Directory'),
         renderCell: (params) => (
           <Chip
             size="small"
-            label={params.value === 'admin' ? 'Admin' : 'User'}
-            color={params.value === 'admin' ? 'primary' : 'default'}
-            variant={params.value === 'admin' ? 'filled' : 'outlined'}
+            label={params.value}
+            color={params.value === 'Login' ? 'success' : 'default'}
+            variant="outlined"
           />
         ),
       },
-      { field: 'uid', headerName: 'UID', width: 220 },
+      {
+        field: 'role',
+        headerName: 'Role',
+        width: 140,
+        renderCell: (params) => {
+          const role = (params.row as AppUser).role;
+          return (
+            <Chip
+              size="small"
+              label={ROLE_LABELS[role]}
+              color={role === 'super_admin' ? 'primary' : role === 'manager' ? 'secondary' : 'default'}
+              variant={role === 'field_staff' ? 'outlined' : 'filled'}
+            />
+          );
+        },
+      },
+      {
+        field: 'access',
+        headerName: 'Access',
+        flex: 1.2,
+        minWidth: 220,
+        sortable: false,
+        valueGetter: (_, row: AppUser) => accessSummary(row),
+      },
+      {
+        field: 'uid',
+        headerName: 'UID',
+        width: 220,
+        valueGetter: (_, row: AppUser) => (row.hasLogin ? row.uid : '—'),
+      },
       {
         field: 'status',
         headerName: 'Status',
@@ -180,21 +222,43 @@ export function UsersPage() {
           <Box>
             {!params.row.isDeleted && (
               <>
-                <Tooltip title="Edit">
-                  <IconButton
-                    size="small"
-                    onClick={() => {
-                      setEditingUser(params.row);
-                      setDialogOpen(true);
-                    }}
-                  >
-                    <EditIcon fontSize="small" />
-                  </IconButton>
+                <Tooltip
+                  title={
+                    params.row.role === 'super_admin' && !isSuperAdmin
+                      ? 'Only a super admin can change this account'
+                      : 'Edit'
+                  }
+                >
+                  <span>
+                    <IconButton
+                      size="small"
+                      disabled={params.row.role === 'super_admin' && !isSuperAdmin}
+                      onClick={() => {
+                        setEditingUser(params.row);
+                        setDialogOpen(true);
+                      }}
+                    >
+                      <EditIcon fontSize="small" />
+                    </IconButton>
+                  </span>
                 </Tooltip>
-                <Tooltip title="Delete">
-                  <IconButton size="small" color="error" onClick={() => handleDelete(params.row)}>
-                    <DeleteIcon fontSize="small" />
-                  </IconButton>
+                <Tooltip
+                  title={
+                    params.row.role === 'super_admin' && !isSuperAdmin
+                      ? 'Only a super admin can change this account'
+                      : 'Delete'
+                  }
+                >
+                  <span>
+                    <IconButton
+                      size="small"
+                      color="error"
+                      disabled={params.row.role === 'super_admin' && !isSuperAdmin}
+                      onClick={() => handleDelete(params.row)}
+                    >
+                      <DeleteIcon fontSize="small" />
+                    </IconButton>
+                  </span>
                 </Tooltip>
               </>
             )}
@@ -209,7 +273,7 @@ export function UsersPage() {
         ),
       },
     ],
-    [],
+    [isSuperAdmin],
   );
 
   if (isLoading) return <LoadingScreen />;
@@ -241,8 +305,8 @@ export function UsersPage() {
       </Box>
 
       <Typography variant="body2" color="text.secondary" mb={2}>
-        Profiles are stored in Firestore. Users created in Firebase Authentication appear here after
-        their first login, or you can link them manually using their UID.
+        Choose a role and turn on the areas that person can open. For field staff who never sign in,
+        check &quot;No login access&quot; — they still appear in SED Representative and other lists.
       </Typography>
 
       <Box sx={{ height: 620, bgcolor: 'background.paper', borderRadius: 2 }}>
@@ -269,7 +333,10 @@ export function UsersPage() {
         onSubmit={editingUser ? handleUpdate : handleCreate}
         initialData={editingUser}
         loading={createMutation.isPending || updateMutation.isPending}
-        allowRoleEdit={isAdmin}
+        allowRoleEdit
+        lockAccess={editingUser?.uid === user?.uid}
+        canAssignSuperAdmin={isSuperAdmin}
+        assignablePermissions={assignablePermissions}
       />
 
       <AppSnackbar

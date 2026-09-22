@@ -13,26 +13,62 @@ import {
   Checkbox,
   Alert,
   MenuItem,
+  Box,
+  Typography,
 } from '@mui/material';
-import type { AppUser, UserFormData } from '@/types';
+import {
+  defaultPermissions,
+  emptyPermissions,
+  fullPermissions,
+  PERMISSION_CATALOG,
+  PERMISSION_KEYS,
+  ROLE_LABELS,
+} from '@/auth/access';
+import type { AppUser, Permission, UserFormData, UserRole } from '@/types';
 
-const schema = yup.object({
-  email: yup.string().email('Invalid email').required('Email is required'),
-  password: yup.string().when('linkExisting', {
-    is: false,
-    then: (s) => s.min(6, 'Password must be at least 6 characters').required('Password is required'),
-    otherwise: (s) => s.optional(),
-  }),
-  uid: yup.string().when('linkExisting', {
-    is: true,
-    then: (s) => s.required('UID is required for existing Auth users'),
-    otherwise: (s) => s.optional(),
-  }),
-  name: yup.string().required('Name is required'),
-  phone: yup.string().optional(),
-  notes: yup.string().optional(),
-  linkExisting: yup.boolean().required(),
-});
+function buildSchema(isEdit: boolean) {
+  return yup.object({
+    email: yup.string().when('noLogin', {
+      is: true,
+      then: (s) => s.optional(),
+      otherwise: (s) => s.email('Invalid email').required('Email is required'),
+    }),
+    password: yup.string().when(['linkExisting', 'noLogin'], {
+      is: (linkExisting: boolean, noLogin: boolean) =>
+        !isEdit && !linkExisting && !noLogin,
+      then: (s) =>
+        s.min(6, 'Password must be at least 6 characters').required('Password is required'),
+      otherwise: (s) => s.optional(),
+    }),
+    uid: yup.string().when(['linkExisting', 'noLogin'], {
+      is: (linkExisting: boolean, noLogin: boolean) => linkExisting && !noLogin,
+      then: (s) => s.required('UID is required for existing Auth users'),
+      otherwise: (s) => s.optional(),
+    }),
+    name: yup.string().required('Name is required'),
+    phone: yup.string().optional(),
+    notes: yup.string().optional(),
+    linkExisting: yup.boolean().required(),
+    noLogin: yup.boolean().required(),
+    role: yup
+      .string()
+      .oneOf(['super_admin', 'manager', 'field_staff'])
+      .required('Role is required'),
+    permissions: yup
+      .object({
+        dashboard: yup.boolean().required(),
+        installations: yup.boolean().required(),
+        payments: yup.boolean().required(),
+        followups: yup.boolean().required(),
+        statistics: yup.boolean().required(),
+        expenses: yup.boolean().required(),
+        inventory: yup.boolean().required(),
+        import: yup.boolean().required(),
+        users: yup.boolean().required(),
+      })
+      .required(),
+  });
+}
 
 interface Props {
   open: boolean;
@@ -41,6 +77,9 @@ interface Props {
   initialData?: AppUser;
   loading?: boolean;
   allowRoleEdit?: boolean;
+  lockAccess?: boolean;
+  canAssignSuperAdmin?: boolean;
+  assignablePermissions?: Permission[];
 }
 
 export function UserFormDialog({
@@ -50,17 +89,25 @@ export function UserFormDialog({
   initialData,
   loading,
   allowRoleEdit = false,
+  lockAccess = false,
+  canAssignSuperAdmin = false,
+  assignablePermissions = [],
 }: Props) {
   const isEdit = Boolean(initialData);
+  const directoryOnly = initialData ? !initialData.hasLogin : false;
+  const assignable = new Set(assignablePermissions);
+  const resolver = yupResolver(buildSchema(isEdit));
 
   const {
     control,
     handleSubmit,
     watch,
     reset,
+    setValue,
+    getValues,
     formState: { errors },
   } = useForm<UserFormData>({
-    resolver: yupResolver(schema),
+    resolver: resolver as never,
     defaultValues: {
       email: '',
       password: '',
@@ -69,14 +116,20 @@ export function UserFormDialog({
       phone: '',
       notes: '',
       linkExisting: false,
-      role: 'user',
+      noLogin: false,
+      role: 'field_staff',
+      permissions: defaultPermissions('field_staff'),
     },
   });
 
   const linkExisting = watch('linkExisting');
+  const noLogin = watch('noLogin');
+  const role = watch('role');
 
   useEffect(() => {
     if (open) {
+      const nextRole = initialData?.role ?? 'field_staff';
+      const isDirectory = initialData ? !initialData.hasLogin : false;
       reset({
         email: initialData?.email ?? '',
         password: '',
@@ -85,10 +138,18 @@ export function UserFormDialog({
         phone: initialData?.phone ?? '',
         notes: initialData?.notes ?? '',
         linkExisting: false,
-        role: initialData?.role ?? 'user',
+        noLogin: isDirectory,
+        role: isDirectory ? 'field_staff' : nextRole,
+        permissions: isDirectory
+          ? emptyPermissions()
+          : nextRole === 'super_admin'
+            ? fullPermissions()
+            : (initialData?.permissions ?? defaultPermissions(nextRole)),
       });
     }
   }, [open, initialData, reset]);
+
+  const showAccessEditor = allowRoleEdit && !lockAccess && !noLogin;
 
   return (
     <Dialog open={open} onClose={onClose} maxWidth="sm" fullWidth>
@@ -97,23 +158,60 @@ export function UserFormDialog({
         {!isEdit && (
           <>
             <Alert severity="info" sx={{ mt: 1, mb: 2 }}>
-              Create a new Firebase Auth account, or link a profile to a user already created in
-              Firebase Authentication (copy UID from the Firebase console).
+              Create a login account, link an existing Firebase Auth user, or add a directory-only
+              person (no email/login) for SED representative lists.
             </Alert>
             <Controller
-              name="linkExisting"
+              name="noLogin"
               control={control}
               render={({ field }) => (
                 <FormControlLabel
-                  control={<Checkbox {...field} checked={field.value} />}
-                  label="User already exists in Firebase Authentication"
+                  control={
+                    <Checkbox
+                      checked={field.value}
+                      onChange={(event) => {
+                        const checked = event.target.checked;
+                        field.onChange(checked);
+                        if (checked) {
+                          setValue('linkExisting', false);
+                          setValue('email', '');
+                          setValue('password', '');
+                          setValue('uid', '');
+                          setValue('role', 'field_staff');
+                          setValue('permissions', emptyPermissions());
+                        } else {
+                          setValue('permissions', defaultPermissions(getValues('role')));
+                        }
+                      }}
+                    />
+                  }
+                  label="No login access (directory only — no email)"
                 />
               )}
             />
+            {!noLogin && (
+              <Controller
+                name="linkExisting"
+                control={control}
+                render={({ field }) => (
+                  <FormControlLabel
+                    control={<Checkbox {...field} checked={field.value} />}
+                    label="User already exists in Firebase Authentication"
+                  />
+                )}
+              />
+            )}
           </>
         )}
 
-        {!isEdit && linkExisting && (
+        {isEdit && directoryOnly && (
+          <Alert severity="info" sx={{ mt: 1, mb: 1 }}>
+            This person has no login. They appear in lists like SED Representative, but cannot sign
+            in.
+          </Alert>
+        )}
+
+        {!isEdit && !noLogin && linkExisting && (
           <Controller
             name="uid"
             control={control}
@@ -130,22 +228,25 @@ export function UserFormDialog({
           />
         )}
 
-        <Controller
-          name="email"
-          control={control}
-          render={({ field }) => (
-            <TextField
-              {...field}
-              fullWidth
-              label="Email"
-              margin="normal"
-              error={!!errors.email}
-              helperText={errors.email?.message}
-            />
-          )}
-        />
+        {!noLogin && (
+          <Controller
+            name="email"
+            control={control}
+            render={({ field }) => (
+              <TextField
+                {...field}
+                fullWidth
+                label="Email"
+                margin="normal"
+                disabled={isEdit && directoryOnly}
+                error={!!errors.email}
+                helperText={errors.email?.message}
+              />
+            )}
+          />
+        )}
 
-        {!isEdit && !linkExisting && (
+        {!isEdit && !noLogin && !linkExisting && (
           <Controller
             name="password"
             control={control}
@@ -201,17 +302,102 @@ export function UserFormDialog({
           )}
         />
 
-        {allowRoleEdit && (
-          <Controller
-            name="role"
-            control={control}
-            render={({ field }) => (
-              <TextField {...field} select fullWidth label="Role" margin="normal">
-                <MenuItem value="user">User</MenuItem>
-                <MenuItem value="admin">Administrator</MenuItem>
-              </TextField>
+        {lockAccess && (
+          <Alert severity="info" sx={{ mt: 2 }}>
+            You can update your profile details. Another person with user access has to change your
+            role or permissions.
+          </Alert>
+        )}
+
+        {noLogin && !isEdit && (
+          <Alert severity="info" sx={{ mt: 2 }}>
+            Directory-only people are saved as field staff with no app access. Use them for SED
+            Representative and similar dropdowns.
+          </Alert>
+        )}
+
+        {showAccessEditor && (
+          <>
+            <Controller
+              name="role"
+              control={control}
+              render={({ field }) => (
+                <TextField
+                  {...field}
+                  select
+                  fullWidth
+                  label="Role"
+                  margin="normal"
+                  onChange={(event) => {
+                    const nextRole = event.target.value as UserRole;
+                    field.onChange(nextRole);
+                    const defaults = defaultPermissions(nextRole);
+                    const current = getValues('permissions');
+                    for (const key of PERMISSION_KEYS) {
+                      if (!assignable.has(key)) defaults[key] = Boolean(current?.[key]);
+                    }
+                    setValue('permissions', defaults);
+                  }}
+                >
+                  {canAssignSuperAdmin && (
+                    <MenuItem value="super_admin">{ROLE_LABELS.super_admin}</MenuItem>
+                  )}
+                  <MenuItem value="manager">{ROLE_LABELS.manager}</MenuItem>
+                  <MenuItem value="field_staff">{ROLE_LABELS.field_staff}</MenuItem>
+                </TextField>
+              )}
+            />
+
+            {role === 'super_admin' ? (
+              <Alert severity="info" sx={{ mt: 1 }}>
+                Super admin has every area, including expenses, inventory, statistics, and users.
+              </Alert>
+            ) : (
+              <Box
+                sx={{
+                  mt: 2,
+                  p: 1.5,
+                  border: 1,
+                  borderColor: 'divider',
+                  borderRadius: 2,
+                }}
+              >
+                <Typography variant="subtitle2">Access</Typography>
+                <Typography variant="body2" color="text.secondary" sx={{ mb: 1 }}>
+                  Turn on only the areas this person should see. Dashboard and statistics show
+                  current company data. Expenses and inventory stay hidden until you grant them.
+                </Typography>
+                {PERMISSION_CATALOG.map((item) => (
+                  <Controller
+                    key={item.key}
+                    name={`permissions.${item.key}`}
+                    control={control}
+                    render={({ field }) => (
+                      <FormControlLabel
+                        sx={{ alignItems: 'flex-start', display: 'flex', ml: 0, my: 0.5 }}
+                        control={
+                          <Checkbox
+                            checked={Boolean(field.value)}
+                            onChange={(event) => field.onChange(event.target.checked)}
+                            disabled={!assignable.has(item.key)}
+                            sx={{ pt: 0.25 }}
+                          />
+                        }
+                        label={
+                          <Box>
+                            <Typography variant="body2">{item.label}</Typography>
+                            <Typography variant="caption" color="text.secondary">
+                              {item.description}
+                            </Typography>
+                          </Box>
+                        }
+                      />
+                    )}
+                  />
+                ))}
+              </Box>
             )}
-          />
+          </>
         )}
       </DialogContent>
       <DialogActions>

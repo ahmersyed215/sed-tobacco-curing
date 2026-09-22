@@ -70,14 +70,73 @@ export const IMPORT_FILE_ACCEPT = IMPORT_FILE_EXTENSIONS.join(',');
 
 export const NEAR_FUTURE_FOLLOWUP_DAYS = 7;
 
+export const EXPENSE_TYPES = [
+  { value: 'TRANSPORT', label: 'Transport' },
+  { value: 'OFFICE', label: 'Office Expense' },
+  { value: 'FOOD', label: 'Food' },
+  { value: 'MOBILE_PACKAGE', label: 'Mobile Package' },
+  { value: 'INSTALLATION', label: 'Installation' },
+  { value: 'MISCELLANEOUS', label: 'Miscellaneous' },
+] as const;
+
+export const EXPENSE_SUBTYPES: Record<
+  'TRANSPORT' | 'OFFICE' | 'FOOD' | 'INSTALLATION',
+  ReadonlyArray<{ value: string; label: string }>
+> = {
+  TRANSPORT: [
+    { value: 'FUEL', label: 'Fuel' },
+    { value: 'CAR_RENT', label: 'Car Rent' },
+    { value: 'MAINTENANCE', label: 'Maintenance' },
+    { value: 'M_TAG', label: 'M-Tag' },
+  ],
+  OFFICE: [
+    { value: 'MAINTENANCE', label: 'Maintenance' },
+    { value: 'UTILITY_BILLS', label: 'Utility Bills' },
+    { value: 'OTHERS', label: 'Others' },
+  ],
+  FOOD: [
+    { value: 'DEPO', label: 'Depo' },
+    { value: 'OFFICE', label: 'Office' },
+  ],
+  INSTALLATION: [
+    { value: 'TOOLS', label: 'Tools' },
+    { value: 'EQUIPMENT', label: 'Equipment' },
+    { value: 'HOTEL_ROOM', label: 'Hotel Room' },
+    { value: 'GENERATOR', label: 'Generator' },
+  ],
+};
+
+export type ExpenseFieldKey =
+  | 'expenseDate'
+  | 'amount'
+  | 'note'
+  | 'sedRepresentative'
+  | 'region'
+  | 'depo'
+  | 'subtype';
+
+export const EXPENSE_TYPE_FIELDS: Record<
+  (typeof EXPENSE_TYPES)[number]['value'],
+  ReadonlyArray<ExpenseFieldKey>
+> = {
+  TRANSPORT: ['expenseDate', 'subtype', 'sedRepresentative', 'amount', 'region', 'depo', 'note'],
+  OFFICE: ['expenseDate', 'subtype', 'amount', 'note'],
+  FOOD: ['expenseDate', 'subtype', 'sedRepresentative', 'amount', 'region', 'depo', 'note'],
+  MOBILE_PACKAGE: ['expenseDate', 'sedRepresentative', 'amount', 'note'],
+  INSTALLATION: ['expenseDate', 'subtype', 'sedRepresentative', 'amount', 'region', 'depo', 'note'],
+  MISCELLANEOUS: ['expenseDate', 'amount', 'note'],
+};
+
 export const NAV_ITEMS = [
-  { label: 'Dashboard', path: '/dashboard', icon: 'Dashboard' },
-  { label: 'Installations', path: '/installations', icon: 'Installations' },
-  { label: 'Payments', path: '/payments', icon: 'Payments' },
-  { label: 'Followups', path: '/followups', icon: 'Followups' },
-  { label: 'Statistics', path: '/statistics', icon: 'Statistics' },
-  { label: 'Import Data', path: '/import', icon: 'Import' },
-  { label: 'Users', path: '/users', icon: 'Users' },
+  { label: 'Dashboard', path: '/dashboard', icon: 'Dashboard', permission: 'dashboard' },
+  { label: 'Installations', path: '/installations', icon: 'Installations', permission: 'installations' },
+  { label: 'Payments', path: '/payments', icon: 'Payments', permission: 'payments' },
+  { label: 'Followups', path: '/followups', icon: 'Followups', permission: 'followups' },
+  { label: 'Inventory', path: '/inventory', icon: 'Inventory', permission: 'inventory' },
+  { label: 'Expenses', path: '/expenses', icon: 'Expenses', permission: 'expenses' },
+  { label: 'Statistics', path: '/statistics', icon: 'Statistics', permission: 'statistics' },
+  { label: 'Import Data', path: '/import', icon: 'Import', permission: 'import' },
+  { label: 'Users', path: '/users', icon: 'Users', permission: 'users' },
 ] as const;
 
 export const RECEIPT_PREFIX = {
@@ -96,4 +155,6 @@ export const QUERY_KEYS = {
   nextReceiptId: (deviceType: string) => ['nextReceiptId', deviceType] as const,
   users: (includeDeleted?: boolean) => ['users', { includeDeleted: !!includeDeleted }] as const,
   user: (id: string) => ['users', id] as const,
+  expenses: (scope: string) => ['expenses', scope] as const,
+  expenseInflows: (scope: string) => ['expenseInflows', scope] as const,
 };

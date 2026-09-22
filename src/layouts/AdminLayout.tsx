@@ -25,8 +25,12 @@ import UploadFileIcon from '@mui/icons-material/UploadFile';
 import PeopleIcon from '@mui/icons-material/People';
 import LogoutIcon from '@mui/icons-material/Logout';
 import AgricultureIcon from '@mui/icons-material/Agriculture';
+import Inventory2Icon from '@mui/icons-material/Inventory2';
+import ReceiptLongIcon from '@mui/icons-material/ReceiptLong';
+import { ROLE_LABELS } from '@/auth/access';
 import { NAV_ITEMS } from '@/constants';
 import { useAuth } from '@/contexts/AuthContext';
+import { useAccess } from '@/hooks/useAdmin';
 
 const DRAWER_WIDTH = 260;
 
@@ -36,6 +40,8 @@ const iconMap: Record<string, React.ReactNode> = {
   Payments: <PaymentsIcon />,
   Followups: <EventNoteIcon />,
   Statistics: <BarChartIcon />,
+  Inventory: <Inventory2Icon />,
+  Expenses: <ReceiptLongIcon />,
   Import: <UploadFileIcon />,
   Users: <PeopleIcon />,
 };
@@ -47,6 +53,8 @@ export function AdminLayout() {
   const navigate = useNavigate();
   const location = useLocation();
   const { user, logout } = useAuth();
+  const { can, profile } = useAccess();
+  const visibleNav = NAV_ITEMS.filter((item) => can(item.permission));
 
   const drawer = (
     <Box sx={{ display: 'flex', flexDirection: 'column', height: '100%' }}>
@@ -63,7 +71,7 @@ export function AdminLayout() {
       </Toolbar>
       <Divider />
       <List sx={{ flex: 1, px: 1 }}>
-        {NAV_ITEMS.map((item) => (
+        {visibleNav.map((item) => (
           <ListItemButton
             key={item.path}
             selected={location.pathname.startsWith(item.path)}
@@ -116,11 +124,18 @@ export function AdminLayout() {
             </IconButton>
           )}
           <Typography variant="h6" sx={{ flexGrow: 1 }}>
-            {NAV_ITEMS.find((item) => location.pathname.startsWith(item.path))?.label ?? 'Admin'}
+            {visibleNav.find((item) => location.pathname.startsWith(item.path))?.label ?? 'SED Tobacco Curing'}
           </Typography>
-          <Typography variant="body2" color="text.secondary">
-            {user?.email}
-          </Typography>
+          <Box sx={{ textAlign: 'right' }}>
+            <Typography variant="body2" color="text.secondary">
+              {user?.email}
+            </Typography>
+            {profile && (
+              <Typography variant="caption" color="text.secondary">
+                {ROLE_LABELS[profile.role]}
+              </Typography>
+            )}
+          </Box>
         </Toolbar>
       </AppBar>
 

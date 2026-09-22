@@ -2,6 +2,8 @@ import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
 import { QUERY_KEYS } from '@/constants';
 import {
   createUser,
+  fetchActiveUsers,
+  fetchManagers,
   fetchUsers,
   restoreUser,
   softDeleteUser,
@@ -13,6 +15,20 @@ export function useUsers(includeDeleted = false) {
   return useQuery({
     queryKey: QUERY_KEYS.users(includeDeleted),
     queryFn: () => fetchUsers(includeDeleted),
+  });
+}
+
+export function useManagers() {
+  return useQuery({
+    queryKey: [...QUERY_KEYS.users(false), 'managers'] as const,
+    queryFn: fetchManagers,
+  });
+}
+
+export function useActiveUsers() {
+  return useQuery({
+    queryKey: [...QUERY_KEYS.users(false), 'active'] as const,
+    queryFn: fetchActiveUsers,
   });
 }
 
@@ -36,7 +52,7 @@ export function useUpdateUser() {
       actorEmail,
     }: {
       id: string;
-      data: Pick<UserFormData, 'name' | 'phone' | 'notes' | 'email' | 'role'>;
+      data: Pick<UserFormData, 'name' | 'phone' | 'notes' | 'email' | 'role' | 'permissions' | 'noLogin'>;
       actorEmail: string;
     }) => updateUser(id, data, actorEmail),
     onSuccess: () => {

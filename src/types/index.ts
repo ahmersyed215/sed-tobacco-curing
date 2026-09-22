@@ -197,7 +197,110 @@ export interface MonthlyCollectionPoint {
   amount: number;
 }
 
-export type UserRole = 'admin' | 'user';
+export type UserRole = 'super_admin' | 'manager' | 'field_staff';
+
+export type ExpenseType =
+  | 'TRANSPORT'
+  | 'OFFICE'
+  | 'FOOD'
+  | 'MOBILE_PACKAGE'
+  | 'INSTALLATION'
+  | 'MISCELLANEOUS';
+
+export type TransportSubtype = 'FUEL' | 'CAR_RENT' | 'MAINTENANCE' | 'M_TAG';
+export type OfficeSubtype = 'MAINTENANCE' | 'UTILITY_BILLS' | 'OTHERS';
+export type FoodSubtype = 'DEPO' | 'OFFICE';
+export type InstallationExpenseSubtype = 'TOOLS' | 'EQUIPMENT' | 'HOTEL_ROOM' | 'GENERATOR';
+
+export type ExpenseSubtype =
+  | TransportSubtype
+  | OfficeSubtype
+  | FoodSubtype
+  | InstallationExpenseSubtype;
+
+export interface Expense {
+  id: string;
+  type: ExpenseType;
+  subtype?: ExpenseSubtype;
+  expenseDate: Date;
+  amount: number;
+  note: string;
+  sedRepresentative?: string;
+  region?: string;
+  depo?: string;
+  walletManagerUid: string;
+  walletManagerName: string;
+  createdByUid: string;
+  createdByName: string;
+  createdAt: Date;
+  updatedAt: Date;
+}
+
+export interface ExpenseFormData {
+  type: ExpenseType;
+  subtype?: ExpenseSubtype | '';
+  expenseDate: Date;
+  amount: number;
+  note: string;
+  sedRepresentative?: string;
+  region?: string;
+  depo?: string;
+  walletManagerUid: string;
+  walletManagerName: string;
+}
+
+export interface ExpenseFilters {
+  dateFrom?: Date | null;
+  dateTo?: Date | null;
+  date?: Date | null;
+  type?: ExpenseType | '';
+  subtype?: ExpenseSubtype | '';
+  region?: string;
+  depo?: string;
+  month?: string;
+}
+
+export interface ExpenseInflow {
+  id: string;
+  walletManagerUid: string;
+  walletManagerName: string;
+  amount: number;
+  inflowDate: Date;
+  note: string;
+  createdByUid: string;
+  createdByName: string;
+  createdAt: Date;
+  updatedAt: Date;
+}
+
+export interface ExpenseInflowFormData {
+  walletManagerUid: string;
+  walletManagerName: string;
+  amount: number;
+  inflowDate: Date;
+  note: string;
+}
+
+export interface ManagerWalletSummary {
+  walletManagerUid: string;
+  walletManagerName: string;
+  totalOutflow: number;
+  totalInflow: number;
+  debt: number;
+}
+
+export type Permission =
+  | 'dashboard'
+  | 'installations'
+  | 'payments'
+  | 'followups'
+  | 'statistics'
+  | 'expenses'
+  | 'inventory'
+  | 'import'
+  | 'users';
+
+export type UserPermissions = Record<Permission, boolean>;
 
 export interface AppUser {
   id: string;
@@ -207,6 +310,8 @@ export interface AppUser {
   phone?: string;
   notes?: string;
   role: UserRole;
+  permissions: UserPermissions;
+  hasLogin: boolean;
   isDeleted: boolean;
   createdAt: Date;
   createdBy: string;
@@ -224,5 +329,7 @@ export interface UserFormData {
   phone?: string;
   notes?: string;
   linkExisting: boolean;
-  role?: UserRole;
+  noLogin: boolean;
+  role: UserRole;
+  permissions: UserPermissions;
 }
